@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Función para validar si el usuario autenticado es administrador (Juancho o Soporte)
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.uid == "8xcJN74gWTag0kEBlezF67WApQ92" || 
+        request.auth.uid == "A84YNswLzgZPCNUCHhPxVvavVjG2"
+      );
+    }
+
+    // Reglas para la carpeta de fotos de jugadores
+    match /jugadores/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

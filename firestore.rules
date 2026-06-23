@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función para validar si el usuario autenticado es administrador (Juancho o Soporte)
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.uid == "8xcJN74gWTag0kEBlezF67WApQ92" || 
+        request.auth.uid == "A84YNswLzgZPCNUCHhPxVvavVjG2"
+      );
+    }
+
+    // Reglas para la colección de jugadores
+    match /jugadores/{jugadorId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Reglas para la colección de partidos
+    match /partidos/{partidoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
