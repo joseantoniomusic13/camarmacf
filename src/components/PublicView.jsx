@@ -423,7 +423,7 @@ export default function PublicView({ onAdminClick, isAdmin }) {
         <div className="relative group mb-4">
           <div className="absolute inset-0 bg-gradient-to-tr from-camarma-blue/35 via-blue-500/20 to-camarma-gold/30 rounded-full blur-2xl opacity-60 group-hover:opacity-100 transition-opacity duration-500 scale-90 animate-pulse"></div>
           <img
-            src="/img/escudo.webp"
+            src="./escudo.webp"
             alt="Camarma CF Escudo"
             className="relative w-32 h-32 md:w-36 md:h-36 object-contain hover:scale-105 hover:rotate-3 transition-all duration-500 drop-shadow-[0_10px_25px_rgba(0,0,0,0.4)] cursor-pointer"
           />

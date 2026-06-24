@@ -579,7 +579,7 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
       <header className="sticky top-0 z-40 bg-slate-800/95 backdrop-blur-md border-b border-slate-700/60 px-4 py-4 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-3">
           <img
-            src="/img/escudo.webp"
+            src="./escudo.webp"
             alt="Camarma CF Escudo"
             className="w-16 h-16 object-contain hover:scale-105 transition-transform duration-300 drop-shadow-[0_2px_8px_rgba(30,58,138,0.3)]"
           />
