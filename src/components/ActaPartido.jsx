@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { db } from "../firebase";
 import { doc, updateDoc, increment } from "firebase/firestore";
-import { X, Check, ChevronDown, User, Shield, ArrowLeftRight, ClipboardList, Award, Activity } from "lucide-react";
+import { X, Check, ChevronDown, User, Shield, ArrowLeftRight, ClipboardList, Award, Activity, UserX } from "lucide-react";
 
 // ─────────────────────────────────────────────
 // FORMACIONES DISPONIBLES
@@ -89,25 +89,172 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
   const [minCambio, setMinCambio] = useState(stats.minCambio ?? "");
   const [sustituidoPorId, setSustituidoPorId] = useState(stats.sustituidoPorId ?? "");
 
+  // Detalle de goles y asistencias para registrar los minutos y penaltis
+  const [golesDetalle, setGolesDetalle] = useState(() => {
+    if (stats.golesDetalle) return stats.golesDetalle;
+    if (stats.goles > 0) {
+      return Array.from({ length: stats.goles }).map(() => ({ minuto: "?", penalti: false }));
+    }
+    return [];
+  });
+  const [asistenciasDetalle, setAsistenciasDetalle] = useState(() => {
+    if (stats.asistenciasDetalle) return stats.asistenciasDetalle;
+    if (stats.asistencias > 0) {
+      return Array.from({ length: stats.asistencias }).map(() => ({ minuto: "?" }));
+    }
+    return [];
+  });
+
+  // Detalle de amarillas y rojas con minuto
+  const [amarillasDetalle, setAmarillasDetalle] = useState(() => {
+    if (stats.amarillasDetalle) return stats.amarillasDetalle;
+    if (stats.amarillas > 0) {
+      return Array.from({ length: stats.amarillas }).map(() => ({ minuto: "?" }));
+    }
+    return [];
+  });
+  const [rojasDetalle, setRojasDetalle] = useState(() => {
+    if (stats.rojasDetalle) return stats.rojasDetalle;
+    if (stats.rojas > 0) {
+      return Array.from({ length: stats.rojas }).map(() => ({ minuto: "?" }));
+    }
+    return [];
+  });
+
+  // Estados para los mini-formularios de añadir gol/asistencia
+  const [showAddGoalPrompt, setShowAddGoalPrompt] = useState(false);
+  const [newGoalMin, setNewGoalMin] = useState("");
+  const [newGoalPenalti, setNewGoalPenalti] = useState(false);
+
+  const [showAddAssistPrompt, setShowAddAssistPrompt] = useState(false);
+  const [newAssistMin, setNewAssistMin] = useState("");
+
+  // Estados para prompts de tarjetas
+  const [showAddAmarillasPrompt, setShowAddAmarillasPrompt] = useState(false);
+  const [newAmarillasMin, setNewAmarillasMin] = useState("");
+  const [showAddRojasPrompt, setShowAddRojasPrompt] = useState(false);
+  const [newRojasMin, setNewRojasMin] = useState("");
+  const [validationError, setValidationError] = useState("");
+
   const handleSave = () => {
+    const minCambioInt = sustituido ? (parseInt(minCambio) || 0) : null;
+    // Si fue sustituido, los minutos jugados = minuto del cambio
+    const minutosFinales = sustituido && minCambioInt ? minCambioInt : (parseInt(minutos) || 0);
     onSave({
-      minutos: parseInt(minutos) || 0,
+      minutos: minutosFinales,
       goles: parseInt(goles) || 0,
       golesContra: parseInt(golesContra) || 0,
       asistencias: parseInt(asistencias) || 0,
-      amarillas: parseInt(amarillas) || 0,
-      rojas: parseInt(rojas) || 0,
+      amarillas: amarillasDetalle.length,
+      rojas: rojasDetalle.length,
       convocado,
       sustituido,
-      minCambio: sustituido ? (parseInt(minCambio) || 0) : null,
+      minCambio: minCambioInt,
       sustituidoPorId: sustituido ? sustituidoPorId : null,
+      golesDetalle,
+      asistenciasDetalle,
+      amarillasDetalle,
+      rojasDetalle
     });
+  };
+
+  const handleRemoveLastGoal = () => {
+    if (golesDetalle.length > 0) {
+      const updated = golesDetalle.slice(0, -1);
+      setGolesDetalle(updated);
+      setGoles(updated.length);
+    } else {
+      setGoles(0);
+    }
+  };
+
+  const handleRemoveLastAssist = () => {
+    if (asistenciasDetalle.length > 0) {
+      const updated = asistenciasDetalle.slice(0, -1);
+      setAsistenciasDetalle(updated);
+      setAsistencias(updated.length);
+    } else {
+      setAsistencias(0);
+    }
+  };
+
+  const handleAddGoal = () => {
+    const min = parseInt(newGoalMin);
+    if (isNaN(min) || min < 1 || min > 120) {
+      setValidationError("Por favor introduce un minuto válido (1-120).");
+      return;
+    }
+    setValidationError("");
+    const updatedGoals = [...golesDetalle, { minuto: min, penalti: newGoalPenalti }].sort((a, b) => {
+      if (a.minuto === "?") return 1;
+      if (b.minuto === "?") return -1;
+      return a.minuto - b.minuto;
+    });
+    setGolesDetalle(updatedGoals);
+    setGoles(updatedGoals.length);
+    setShowAddGoalPrompt(false);
+    setNewGoalMin("");
+    setNewGoalPenalti(false);
+  };
+
+  const handleAddAssist = () => {
+    const min = parseInt(newAssistMin);
+    if (isNaN(min) || min < 1 || min > 120) {
+      setValidationError("Por favor introduce un minuto válido (1-120).");
+      return;
+    }
+    setValidationError("");
+    const updatedAssists = [...asistenciasDetalle, { minuto: min }].sort((a, b) => {
+      if (a.minuto === "?") return 1;
+      if (b.minuto === "?") return -1;
+      return a.minuto - b.minuto;
+    });
+    setAsistenciasDetalle(updatedAssists);
+    setAsistencias(updatedAssists.length);
+    setShowAddAssistPrompt(false);
+    setNewAssistMin("");
+  };
+
+  const handleAddAmarilla = () => {
+    const min = parseInt(newAmarillasMin);
+    if (isNaN(min) || min < 1 || min > 120) {
+      setValidationError("Por favor introduce un minuto válido (1-120).");
+      return;
+    }
+    setValidationError("");
+    const updated = [...amarillasDetalle, { minuto: min }].sort((a, b) => {
+      if (a.minuto === "?") return 1;
+      if (b.minuto === "?") return -1;
+      return a.minuto - b.minuto;
+    });
+    setAmarillasDetalle(updated);
+    setAmarillas(updated.length);
+    setShowAddAmarillasPrompt(false);
+    setNewAmarillasMin("");
+  };
+
+  const handleAddRoja = () => {
+    const min = parseInt(newRojasMin);
+    if (isNaN(min) || min < 1 || min > 120) {
+      setValidationError("Por favor introduce un minuto válido (1-120).");
+      return;
+    }
+    setValidationError("");
+    const updated = [...rojasDetalle, { minuto: min }].sort((a, b) => {
+      if (a.minuto === "?") return 1;
+      if (b.minuto === "?") return -1;
+      return a.minuto - b.minuto;
+    });
+    setRojasDetalle(updated);
+    setRojas(updated.length);
+    setShowAddRojasPrompt(false);
+    setNewRojasMin("");
   };
 
   const esPortero = jugador?.isPortero || jugador?.posicion === "Portero";
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-955/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden max-h-[90vh] animate-in zoom-in-95 duration-200">
         
         {/* Cabecera del modal */}
@@ -138,6 +285,12 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
         {/* Cuerpo del formulario scrollable */}
         <div className="p-6 space-y-5 overflow-y-auto flex-1 font-sans">
           
+          {validationError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-xl font-bold text-left">
+              ⚠️ {validationError}
+            </div>
+          )}
+
           {/* Convocado / Convocatoria Switch */}
           <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850/60 p-3.5 rounded-2xl">
             <div>
@@ -191,46 +344,198 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
           {/* Goles Favor / Contra / Asistencias */}
           <div className="space-y-4 pt-2 border-t border-slate-850/60">
             {!esPortero ? (
-              <div className="grid grid-cols-2 gap-4">
-                {/* Goles */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">⚽ Goles</label>
-                  <div className="flex items-center gap-2 bg-slate-950/20 p-1.5 border border-slate-850 rounded-2xl">
-                    <button
-                      onClick={() => setGoles(Math.max(0, goles - 1))}
-                      className="w-9 h-9 bg-red-950/30 text-red-400 border border-red-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                    >
-                      -
-                    </button>
-                    <span className="flex-1 text-center text-xl font-mono font-black text-white">{goles}</span>
-                    <button
-                      onClick={() => setGoles(goles + 1)}
-                      className="w-9 h-9 bg-emerald-950/30 text-emerald-400 border border-emerald-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                    >
-                      +
-                    </button>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Goles */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">⚽ Goles</label>
+                    <div className="flex items-center gap-2 bg-slate-950/40 p-1.5 border border-slate-850/80 rounded-2xl shadow-inner">
+                      <button
+                        type="button"
+                        onClick={handleRemoveLastGoal}
+                        className="w-9 h-9 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                      >
+                        -
+                      </button>
+                      <span className="flex-1 text-center text-xl font-mono font-black text-white">{goles}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddGoalPrompt(!showAddGoalPrompt);
+                          setShowAddAssistPrompt(false);
+                        }}
+                        className="w-9 h-9 bg-emerald-955/20 hover:bg-emerald-955/40 text-emerald-400 border border-emerald-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Asistencias */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">👟 Asistencias</label>
+                    <div className="flex items-center gap-2 bg-slate-950/40 p-1.5 border border-slate-850/80 rounded-2xl shadow-inner">
+                      <button
+                        type="button"
+                        onClick={handleRemoveLastAssist}
+                        className="w-9 h-9 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                      >
+                        -
+                      </button>
+                      <span className="flex-1 text-center text-xl font-mono font-black text-white">{asistencias}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddAssistPrompt(!showAddAssistPrompt);
+                          setShowAddGoalPrompt(false);
+                        }}
+                        className="w-9 h-9 bg-emerald-955/20 hover:bg-emerald-955/40 text-emerald-400 border border-emerald-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Asistencias */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">👟 Asistencias</label>
-                  <div className="flex items-center gap-2 bg-slate-950/20 p-1.5 border border-slate-850 rounded-2xl">
-                    <button
-                      onClick={() => setAsistencias(Math.max(0, asistencias - 1))}
-                      className="w-9 h-9 bg-red-950/30 text-red-400 border border-red-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                    >
-                      -
-                    </button>
-                    <span className="flex-1 text-center text-xl font-mono font-black text-white">{asistencias}</span>
-                    <button
-                      onClick={() => setAsistencias(asistencias + 1)}
-                      className="w-9 h-9 bg-emerald-950/30 text-emerald-400 border border-emerald-900/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                    >
-                      +
-                    </button>
+                {/* Formulario Añadir Gol */}
+                {showAddGoalPrompt && (
+                  <div className="bg-slate-950/80 p-3.5 border border-slate-850 rounded-2xl space-y-3 animate-in slide-in-from-top-2 duration-200">
+                    <span className="block text-[10px] font-black uppercase text-camarma-gold tracking-wider">⚽ Añadir Gol</span>
+                    <div className="grid grid-cols-2 gap-3 items-end">
+                      <div className="space-y-1">
+                        <label className="block text-[9px] uppercase text-slate-500 font-bold">Minuto de Juego</label>
+                        <input
+                          type="number"
+                          placeholder="Ej: 34"
+                          value={newGoalMin}
+                          onChange={(e) => setNewGoalMin(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-camarma-blue font-mono font-bold"
+                          min="1"
+                          max="120"
+                        />
+                      </div>
+                      <div className="pb-2.5">
+                        <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={newGoalPenalti}
+                            onChange={(e) => setNewGoalPenalti(e.target.checked)}
+                            className="rounded border-slate-800 bg-slate-900 text-camarma-blue focus:ring-0 w-4 h-4"
+                          />
+                          ¿Fue penalti?
+                        </label>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 justify-end text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddGoalPrompt(false);
+                          setNewGoalMin("");
+                          setNewGoalPenalti(false);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddGoal}
+                        className="px-4 py-1.5 rounded-lg bg-camarma-blue hover:bg-blue-600 text-white shadow-sm transition-colors"
+                      >
+                        Confirmar
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Formulario Añadir Asistencia */}
+                {showAddAssistPrompt && (
+                  <div className="bg-slate-950/80 p-3.5 border border-slate-850 rounded-2xl space-y-3 animate-in slide-in-from-top-2 duration-200">
+                    <span className="block text-[10px] font-black uppercase text-camarma-gold tracking-wider">👟 Añadir Asistencia</span>
+                    <div className="space-y-1">
+                      <label className="block text-[9px] uppercase text-slate-500 font-bold">Minuto de Juego</label>
+                      <input
+                        type="number"
+                        placeholder="Ej: 72"
+                        value={newAssistMin}
+                        onChange={(e) => setNewAssistMin(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-camarma-blue font-mono font-bold"
+                        min="1"
+                        max="120"
+                      />
+                    </div>
+                    <div className="flex gap-2 justify-end text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddAssistPrompt(false);
+                          setNewAssistMin("");
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddAssist}
+                        className="px-4 py-1.5 rounded-lg bg-camarma-blue hover:bg-blue-600 text-white shadow-sm transition-colors"
+                      >
+                        Confirmar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Listados de Desglose de Goles */}
+                {golesDetalle.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Desglose de Goles</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {golesDetalle.map((g, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-850 text-[10px] font-extrabold text-white px-2.5 py-1 rounded-xl shadow-sm">
+                          ⚽ {g.minuto === "?" ? "Gol" : "Min. " + g.minuto}{g.penalti ? " (P)" : ""}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = golesDetalle.filter((_, i) => i !== idx);
+                              setGolesDetalle(updated);
+                              setGoles(updated.length);
+                            }}
+                            className="text-red-400 hover:text-red-300 font-black ml-0.5 text-xs hover:bg-slate-900 rounded px-1 transition-all cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Listados de Desglose de Asistencias */}
+                {asistenciasDetalle.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="block text-[9px] font-extrabold uppercase tracking-wider text-slate-500">Desglose de Asistencias</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {asistenciasDetalle.map((a, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1.5 bg-slate-950 border border-slate-850 text-[10px] font-extrabold text-white px-2.5 py-1 rounded-xl shadow-sm">
+                          👟 {a.minuto === "?" ? "Asist." : "Min. " + a.minuto}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = asistenciasDetalle.filter((_, i) => i !== idx);
+                              setAsistenciasDetalle(updated);
+                              setAsistencias(updated.length);
+                            }}
+                            className="text-red-400 hover:text-red-300 font-black ml-0.5 text-xs hover:bg-slate-900 rounded px-1 transition-all cursor-pointer"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* Goles Contra para Portero */
@@ -238,6 +543,7 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
                 <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🥅 Goles Recibidos</label>
                 <div className="flex items-center gap-3 bg-slate-950/20 p-2 border border-slate-850 rounded-2xl">
                   <button
+                    type="button"
                     onClick={() => setGolesContra(Math.max(0, golesContra - 1))}
                     className="w-11 h-11 bg-red-955/40 text-red-400 border border-red-900/20 rounded-xl text-xl font-black active:scale-90 cursor-pointer flex items-center justify-center"
                   >
@@ -245,6 +551,7 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
                   </button>
                   <span className="flex-1 text-center text-2xl font-mono font-black text-white">{golesContra}</span>
                   <button
+                    type="button"
                     onClick={() => setGolesContra(golesContra + 1)}
                     className="w-11 h-11 bg-emerald-955/40 text-emerald-400 border border-emerald-900/20 rounded-xl text-xl font-black active:scale-90 cursor-pointer flex items-center justify-center"
                   >
@@ -256,45 +563,124 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
           </div>
 
           {/* Tarjetas */}
-          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-850/60">
+          <div className="space-y-3 pt-2 border-t border-slate-850/60">
+
             {/* Amarillas */}
             <div className="space-y-2">
-              <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🟨 Amarillas</label>
-              <div className="flex items-center gap-2 bg-slate-950/20 p-1.5 border border-slate-850 rounded-2xl">
-                <button
-                  onClick={() => setAmarillas(Math.max(0, amarillas - 1))}
-                  className="w-9 h-9 bg-slate-850 hover:bg-slate-800 text-slate-350 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center border border-slate-800"
-                >
-                  -
-                </button>
-                <span className="flex-1 text-center text-lg font-mono font-black text-yellow-400">{amarillas}</span>
-                <button
-                  onClick={() => setAmarillas(amarillas + 1)}
-                  className="w-9 h-9 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                >
-                  +
-                </button>
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🟨 Amarillas</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (amarillasDetalle.length > 0) {
+                        const updated = amarillasDetalle.slice(0, -1);
+                        setAmarillasDetalle(updated);
+                        setAmarillas(updated.length);
+                      }
+                    }}
+                    className="w-8 h-8 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/20 rounded-lg text-base font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                  >-</button>
+                  <span className="w-8 text-center text-lg font-mono font-black text-yellow-400">{amarillasDetalle.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddAmarillasPrompt(!showAddAmarillasPrompt);
+                      setShowAddRojasPrompt(false);
+                    }}
+                    className="w-8 h-8 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded-lg text-base font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                  >+</button>
+                </div>
               </div>
+              {showAddAmarillasPrompt && (
+                <div className="bg-slate-950/80 p-3 border border-yellow-900/30 rounded-2xl space-y-2 animate-in slide-in-from-top-2 duration-200">
+                  <span className="block text-[10px] font-black uppercase text-yellow-400 tracking-wider">🟨 Minuto de la Amarilla</span>
+                  <div className="flex gap-2 items-end">
+                    <input
+                      type="number"
+                      placeholder="Ej: 45"
+                      value={newAmarillasMin}
+                      onChange={(e) => setNewAmarillasMin(e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-yellow-500 font-mono font-bold"
+                      min="1" max="120"
+                      autoFocus
+                    />
+                    <div className="flex gap-1.5 text-[10px] font-bold">
+                      <button type="button" onClick={() => { setShowAddAmarillasPrompt(false); setNewAmarillasMin(""); }} className="px-2.5 py-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors">✕</button>
+                      <button type="button" onClick={handleAddAmarilla} className="px-3 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white shadow-sm transition-colors">✓</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {amarillasDetalle.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {amarillasDetalle.map((a, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1.5 bg-yellow-950/30 border border-yellow-900/30 text-[10px] font-extrabold text-yellow-400 px-2.5 py-1 rounded-xl">
+                      🟨 Min. {a.minuto === "?" ? "?" : a.minuto}
+                      <button type="button" onClick={() => { const u = amarillasDetalle.filter((_, i) => i !== idx); setAmarillasDetalle(u); setAmarillas(u.length); }} className="text-red-400 hover:text-red-300 font-black text-xs cursor-pointer">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Rojas */}
             <div className="space-y-2">
-              <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🟥 Rojas</label>
-              <div className="flex items-center gap-2 bg-slate-950/20 p-1.5 border border-slate-850 rounded-2xl">
-                <button
-                  onClick={() => setRojas(Math.max(0, rojas - 1))}
-                  className="w-9 h-9 bg-slate-850 hover:bg-slate-800 text-slate-350 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center border border-slate-800"
-                >
-                  -
-                </button>
-                <span className="flex-1 text-center text-lg font-mono font-black text-red-500">{rojas}</span>
-                <button
-                  onClick={() => setRojas(rojas + 1)}
-                  className="w-9 h-9 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg text-lg font-black active:scale-90 cursor-pointer flex items-center justify-center"
-                >
-                  +
-                </button>
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🟥 Rojas</label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (rojasDetalle.length > 0) {
+                        const updated = rojasDetalle.slice(0, -1);
+                        setRojasDetalle(updated);
+                        setRojas(updated.length);
+                      }
+                    }}
+                    className="w-8 h-8 bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/20 rounded-lg text-base font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                  >-</button>
+                  <span className="w-8 text-center text-lg font-mono font-black text-red-500">{rojasDetalle.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddRojasPrompt(!showAddRojasPrompt);
+                      setShowAddAmarillasPrompt(false);
+                    }}
+                    className="w-8 h-8 bg-red-500/10 text-red-500 border border-red-500/20 rounded-lg text-base font-black active:scale-90 cursor-pointer flex items-center justify-center transition-all"
+                  >+</button>
+                </div>
               </div>
+              {showAddRojasPrompt && (
+                <div className="bg-slate-950/80 p-3 border border-red-900/30 rounded-2xl space-y-2 animate-in slide-in-from-top-2 duration-200">
+                  <span className="block text-[10px] font-black uppercase text-red-400 tracking-wider">🟥 Minuto de la Roja</span>
+                  <div className="flex gap-2 items-end">
+                    <input
+                      type="number"
+                      placeholder="Ej: 78"
+                      value={newRojasMin}
+                      onChange={(e) => setNewRojasMin(e.target.value)}
+                      className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-red-500 font-mono font-bold"
+                      min="1" max="120"
+                      autoFocus
+                    />
+                    <div className="flex gap-1.5 text-[10px] font-bold">
+                      <button type="button" onClick={() => { setShowAddRojasPrompt(false); setNewRojasMin(""); }} className="px-2.5 py-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors">✕</button>
+                      <button type="button" onClick={handleAddRoja} className="px-3 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white shadow-sm transition-colors">✓</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {rojasDetalle.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {rojasDetalle.map((r, idx) => (
+                    <span key={idx} className="inline-flex items-center gap-1.5 bg-red-950/30 border border-red-900/30 text-[10px] font-extrabold text-red-400 px-2.5 py-1 rounded-xl">
+                      🟥 Min. {r.minuto === "?" ? "?" : r.minuto}
+                      <button type="button" onClick={() => { const u = rojasDetalle.filter((_, i) => i !== idx); setRojasDetalle(u); setRojas(u.length); }} className="text-red-400 hover:text-red-300 font-black text-xs cursor-pointer">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -315,14 +701,29 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
             {sustituido && (
               <div className="space-y-3 bg-slate-950/40 p-4 border border-slate-850 rounded-2xl animate-in fade-in duration-200">
                 <div className="grid grid-cols-3 gap-3 items-center">
-                  <label className="text-xs font-bold text-slate-400 col-span-1">Minuto</label>
-                  <input
-                    type="number"
-                    value={minCambio}
-                    onChange={(e) => setMinCambio(e.target.value)}
-                    placeholder="Ej. 65"
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-camarma-blue font-mono col-span-2"
-                  />
+                  <label className="text-xs font-bold text-slate-400 col-span-1">Minuto cambio</label>
+                  <div className="col-span-2 space-y-1">
+                    <input
+                      type="number"
+                      value={minCambio}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMinCambio(val);
+                        // Auto-calcular minutos del jugador que sale
+                        const parsed = parseInt(val);
+                        if (!isNaN(parsed) && parsed >= 1 && parsed <= 120) {
+                          setMinutos(parsed);
+                        }
+                      }}
+                      placeholder="Ej. 65"
+                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-orange-500 font-mono"
+                    />
+                    {minCambio && !isNaN(parseInt(minCambio)) && (
+                      <p className="text-[9px] text-orange-400/80 font-bold">
+                        ⏱️ Jugará {parseInt(minCambio)}\'  · El suplente entrará en el {parseInt(minCambio)}\' y jugará {Math.max(0, 90 - parseInt(minCambio))}\'
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 items-center">
                   <label className="text-xs font-bold text-slate-400 col-span-1">Entra</label>
@@ -330,11 +731,12 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
                     <select
                       value={sustituidoPorId}
                       onChange={(e) => setSustituidoPorId(e.target.value)}
-                      className="w-full bg-slate-955 border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-bold outline-none appearance-none cursor-pointer focus:border-camarma-blue"
+                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-bold outline-none appearance-none cursor-pointer focus:border-camarma-blue"
+                      style={{ backgroundColor: "#0f172a", color: "#ffffff" }}
                     >
-                      <option value="">-- Selecciona --</option>
+                      <option value="" className="bg-slate-900 text-white" style={{ backgroundColor: "#0f172a", color: "#ffffff" }}>-- Selecciona --</option>
                       {jugadoresPlantilla.map(j => (
-                        <option key={j.id} value={j.id}>{j.nombre}</option>
+                        <option key={j.id} value={j.id} className="bg-slate-900 text-white" style={{ backgroundColor: "#0f172a", color: "#ffffff" }}>{j.nombre}</option>
                       ))}
                     </select>
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
@@ -349,7 +751,7 @@ function ModalJugadorActa({ jugador, stats, jugadoresPlantilla, onSave, onClose,
         </div>
 
         {/* Footer / Guardar */}
-        <div className="bg-slate-955/40 p-4 border-t border-slate-850 flex flex-col gap-2">
+        <div className="bg-slate-950/40 p-4 border-t border-slate-850 flex flex-col gap-2">
           <button
             onClick={handleSave}
             className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-black py-4 rounded-2xl text-sm shadow-md transition-all active:scale-[0.98] cursor-pointer select-none uppercase tracking-wider"
@@ -430,11 +832,71 @@ export default function ActaPartido({ match, jugadores, onClose }) {
   const [statsJugadores, setStatsJugadores] = useState(match.statsJugadores ?? {});
   const [cronica, setCronica] = useState(match.cronica ?? "");
   const [mvpJugadorId, setMvpJugadorId] = useState(match.mvpJugadorId ?? "");
+  const [golesCamarma, setGolesCamarma] = useState(match.golesCamarma ?? 0);
+  const [golesRival, setGolesRival] = useState(match.golesRival ?? 0);
   const [modalSlot, setModalSlot] = useState(null); // slotId o "suplente_{id}"
   const [selectorSlot, setSelectorSlot] = useState(null); // slotId que está eligiendo jugador
   const [guardando, setGuardando] = useState(false);
   const [guardado, setGuardado] = useState(false);
   const [error, setError] = useState("");
+  const [pendingDischarge, setPendingDischarge] = useState(null);
+  const [toast, setToast] = useState(null); // { message, type }
+
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  // ── Autoguardado con debounce ────────────────
+  const [autoSaveStatus, setAutoSaveStatus] = useState(null); // null | 'saving' | 'saved'
+  const autoSaveTimer = useRef(null);
+  const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    // Saltamos el primer render para no guardar innecesariamente al montar
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    // Cancelar el timer anterior si hay cambios rápidos
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setAutoSaveStatus('saving');
+    autoSaveTimer.current = setTimeout(async () => {
+      try {
+        const matchRef = doc(db, "partidos", match.id);
+        await updateDoc(matchRef, {
+          cronica: cronica.trim(),
+          mvpJugadorId: mvpJugadorId || null,
+          alineacion: { formacion, asignaciones, suplentes },
+          statsJugadores,
+          golesCamarma,
+          golesRival,
+        });
+        setAutoSaveStatus('saved');
+        // Limpiar el indicador a los 3s
+        setTimeout(() => setAutoSaveStatus(null), 3000);
+      } catch (e) {
+        console.error('Autoguardado fallido:', e);
+        setAutoSaveStatus(null);
+      }
+    }, 1500);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [statsJugadores, golesCamarma, golesRival, cronica, mvpJugadorId, formacion, asignaciones, suplentes]);
+
+  // ── Refs para sincronización de estadísticas de plantilla ──────────
+  // 'statsJugadoresConfirmados' es el campo de Firestore que registra exactamente
+  // qué stats se han aplicado a los documentos de jugadores. Es la fuente fiable
+  // para calcular el diff y nunca se confunde con el autoguardado de statsJugadores.
+  const lastConfirmedStatsRef = useRef(
+    match.statsJugadoresConfirmados || 
+    (match.actaGuardada ? match.statsJugadores || {} : {})
+  );
+  const lastConfirmedMvpRef = useRef(match.mvpJugadorId || "");
+  // Evita doble sincronización si el usuario pulsa Confirmar y luego cierra
+  const actaConfirmadaEnSesionRef = useRef(false);
+  const [cerrando, setCerrando] = useState(false);
 
   const slots = FORMACIONES[formacion].slots;
 
@@ -457,12 +919,76 @@ export default function ActaPartido({ match, jugadores, onClose }) {
     }
   };
 
-  const asignarJugador = (slotId, jugadorId) => {
-    setAsignaciones(prev => ({ ...prev, [slotId]: jugadorId }));
-    if (!statsJugadores[jugadorId]) {
-      setStatsJugadores(prev => ({ ...prev, [jugadorId]: { minutos: 90, goles: 0, golesContra: 0, asistencias: 0, amarillas: 0, rojas: 0, convocado: true } }));
+  const dischargePlayer = async (player) => {
+    try {
+      const todayStr = new Date().toISOString().split("T")[0];
+      const baja = player.fechaBaja || todayStr;
+      
+      const diffTime = new Date(todayStr) - new Date(baja);
+      const duracion = diffTime >= 0 ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
+
+      const archiveEntry = {
+        id: Date.now().toString(),
+        tipoLesion: player.tipoLesion || "Molestias físicas",
+        fechaBaja: baja,
+        fechaAlta: todayStr,
+        duracion: duracion
+      };
+
+      const currentHistorial = player.historialLesiones || [];
+      const playerRef = doc(db, "jugadores", player.id);
+      
+      await updateDoc(playerRef, {
+        lesionado: false,
+        tipoLesion: "",
+        fechaBaja: "",
+        fechaRecuperacion: "",
+        historialLesiones: [...currentHistorial, archiveEntry]
+      });
+    } catch (err) {
+      console.error("Error al dar de alta al jugador:", err);
+      showToast("Error al actualizar el estado médico del jugador.", "error");
     }
-    setSelectorSlot(null);
+    setPendingDischarge(null);
+  };
+
+  const tryAsignarJugador = (slotId, jugadorId) => {
+    const player = jugadores.find(j => j.id === jugadorId);
+    if (!player) return;
+
+    const proceed = () => {
+      setAsignaciones(prev => ({ ...prev, [slotId]: jugadorId }));
+      if (!statsJugadores[jugadorId]) {
+        setStatsJugadores(prev => ({ 
+          ...prev, 
+          [jugadorId]: { 
+            minutos: 90, 
+            goles: 0, 
+            golesContra: 0, 
+            asistencias: 0, 
+            amarillas: 0, 
+            rojas: 0, 
+            convocado: true, 
+            golesDetalle: [], 
+            asistenciasDetalle: [] 
+          } 
+        }));
+      }
+      setSelectorSlot(null);
+    };
+
+    if (player.lesionado) {
+      setPendingDischarge({
+        player,
+        onConfirm: async () => {
+          await dischargePlayer(player);
+          proceed();
+        },
+        onCancel: () => setPendingDischarge(null)
+      });
+    } else {
+      proceed();
+    }
   };
 
   const desasignarSlot = (slotId) => {
@@ -473,12 +999,47 @@ export default function ActaPartido({ match, jugadores, onClose }) {
     });
   };
 
-  const addSuplente = (jugadorId) => {
-    setSuplentes(prev => [...prev, jugadorId]);
-    if (!statsJugadores[jugadorId]) {
-      setStatsJugadores(prev => ({ ...prev, [jugadorId]: { minutos: 0, goles: 0, golesContra: 0, asistencias: 0, amarillas: 0, rojas: 0, convocado: true } }));
+  const tryAddSuplente = (jugadorId) => {
+    if (suplentes.length >= 9) {
+      showToast("Máximo 9 suplentes en el banquillo.", "warning");
+      return;
     }
-    setSelectorSlot(null);
+    const player = jugadores.find(j => j.id === jugadorId);
+    if (!player) return;
+
+    const proceed = () => {
+      setSuplentes(prev => [...prev, jugadorId]);
+      if (!statsJugadores[jugadorId]) {
+        setStatsJugadores(prev => ({ 
+          ...prev, 
+          [jugadorId]: { 
+            minutos: 0, 
+            goles: 0, 
+            golesContra: 0, 
+            asistencias: 0, 
+            amarillas: 0, 
+            rojas: 0, 
+            convocado: true, 
+            golesDetalle: [], 
+            asistenciasDetalle: [] 
+          } 
+        }));
+      }
+      setSelectorSlot(null);
+    };
+
+    if (player.lesionado) {
+      setPendingDischarge({
+        player,
+        onConfirm: async () => {
+          await dischargePlayer(player);
+          proceed();
+        },
+        onCancel: () => setPendingDischarge(null)
+      });
+    } else {
+      proceed();
+    }
   };
 
   const removeSuplente = (jugadorId) => {
@@ -486,7 +1047,25 @@ export default function ActaPartido({ match, jugadores, onClose }) {
   };
 
   const guardarStats = (jugadorId, newStats) => {
-    setStatsJugadores(prev => ({ ...prev, [jugadorId]: newStats }));
+    setStatsJugadores(prev => {
+      const updated = { ...prev, [jugadorId]: newStats };
+      // Si el jugador que sale fue sustituido y tiene minuto de cambio,
+      // actualizar automáticamente los minutos del jugador que entra
+      if (newStats.sustituido && newStats.sustituidoPorId && newStats.minCambio) {
+        const minEntrada = Math.max(0, 90 - newStats.minCambio);
+        const sustitutoActual = updated[newStats.sustituidoPorId] || {
+          minutos: minEntrada, goles: 0, golesContra: 0, asistencias: 0,
+          amarillas: 0, rojas: 0, convocado: true,
+          golesDetalle: [], asistenciasDetalle: [],
+          amarillasDetalle: [], rojasDetalle: []
+        };
+        updated[newStats.sustituidoPorId] = {
+          ...sustitutoActual,
+          minutos: minEntrada
+        };
+      }
+      return updated;
+    });
     setModalSlot(null);
   };
 
@@ -494,84 +1073,88 @@ export default function ActaPartido({ match, jugadores, onClose }) {
     ? (modalSlot.startsWith("suplente_") ? modalSlot.replace("suplente_", "") : asignaciones[modalSlot])
     : null;
 
-  // Confirmar el Acta
+  // ── Sincroniza estadísticas de jugadores (diff entre baseline y estado actual) ──
+  const syncPlayerStats = async (oldStats, newStats, oldMvpId, newMvpId) => {
+    const todosLosJugadoresIds = new Set([
+      ...Object.values(asignaciones).filter(Boolean),
+      ...suplentes,
+      ...Object.keys(oldStats)
+    ]);
+
+    for (const jugadorId of todosLosJugadoresIds) {
+      const playerRef = doc(db, "jugadores", jugadorId);
+      const playerOld = oldStats[jugadorId] || { minutos: 0, goles: 0, golesContra: 0, asistencias: 0, amarillas: 0, rojas: 0, convocado: false };
+      const playerNew = newStats[jugadorId];
+      const updates = {};
+
+      if (playerNew) {
+        const diffMinutos = (playerNew.minutos || 0) - (playerOld.minutos || 0);
+        const diffGoles = (playerNew.goles || 0) - (playerOld.goles || 0);
+        const diffGolesContra = (playerNew.golesContra || 0) - (playerOld.golesContra || 0);
+        const diffAsistencias = (playerNew.asistencias || 0) - (playerOld.asistencias || 0);
+        const diffAmarillas = (playerNew.amarillas || 0) - (playerOld.amarillas || 0);
+        const diffRojas = (playerNew.rojas || 0) - (playerOld.rojas || 0);
+        const diffConvocado = (playerNew.convocado ? 1 : 0) - (playerOld.convocado ? 1 : 0);
+
+        if (diffMinutos !== 0) updates.minutosJugados = increment(diffMinutos);
+        if (diffGoles !== 0) updates.golesFavor = increment(diffGoles);
+        if (diffGolesContra !== 0) updates.golesContra = increment(diffGolesContra);
+        if (diffAsistencias !== 0) updates.asistencias = increment(diffAsistencias);
+        if (diffAmarillas !== 0) updates.tarjetasAmarillas = increment(diffAmarillas);
+        if (diffRojas !== 0) updates.tarjetasRojas = increment(diffRojas);
+        if (diffConvocado !== 0) updates.partidosConvocados = increment(diffConvocado);
+      } else {
+        if (playerOld.minutos > 0) updates.minutosJugados = increment(-playerOld.minutos);
+        if (playerOld.goles > 0) updates.golesFavor = increment(-playerOld.goles);
+        if (playerOld.golesContra > 0) updates.golesContra = increment(-playerOld.golesContra);
+        if (playerOld.asistencias > 0) updates.asistencias = increment(-playerOld.asistencias);
+        if (playerOld.amarillas > 0) updates.tarjetasAmarillas = increment(-playerOld.amarillas);
+        if (playerOld.rojas > 0) updates.tarjetasRojas = increment(-playerOld.rojas);
+        if (playerOld.convocado) updates.partidosConvocados = increment(-1);
+      }
+
+      // MVP diff
+      let diffMvp = 0;
+      if (oldMvpId === jugadorId && newMvpId !== jugadorId) diffMvp = -1;
+      else if (oldMvpId !== jugadorId && newMvpId === jugadorId) diffMvp = 1;
+      if (diffMvp !== 0) updates.mvps = increment(diffMvp);
+
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(playerRef, updates);
+      }
+    }
+  };
+
+  // Confirmar el Acta (también actualiza plantilla)
   const confirmarActa = async () => {
     setGuardando(true);
     setError("");
     try {
-      const oldStats = match.statsJugadores || {};
+      const oldStats = lastConfirmedStatsRef.current;
       const newStats = statsJugadores;
-      const oldMvpId = match.mvpJugadorId || "";
+      const oldMvpId = lastConfirmedMvpRef.current;
       const newMvpId = mvpJugadorId || "";
 
-      const todosLosJugadoresIds = new Set([
-        ...Object.values(asignaciones).filter(Boolean),
-        ...suplentes,
-        ...Object.keys(oldStats)
-      ]);
+      await syncPlayerStats(oldStats, newStats, oldMvpId, newMvpId);
 
-      for (const jugadorId of todosLosJugadoresIds) {
-        const playerRef = doc(db, "jugadores", jugadorId);
-        const playerOld = oldStats[jugadorId] || { minutos: 0, goles: 0, golesContra: 0, asistencias: 0, amarillas: 0, rojas: 0, convocado: false };
-        const playerNew = newStats[jugadorId];
-
-        const updates = {};
-
-        if (playerNew) {
-          const diffMinutos = (playerNew.minutos || 0) - (playerOld.minutos || 0);
-          const diffGoles = (playerNew.goles || 0) - (playerOld.goles || 0);
-          const diffGolesContra = (playerNew.golesContra || 0) - (playerOld.golesContra || 0);
-          const diffAsistencias = (playerNew.asistencias || 0) - (playerOld.asistencias || 0);
-          const diffAmarillas = (playerNew.amarillas || 0) - (playerOld.amarillas || 0);
-          const diffRojas = (playerNew.rojas || 0) - (playerOld.rojas || 0);
-          const diffConvocado = (playerNew.convocado ? 1 : 0) - (playerOld.convocado ? 1 : 0);
-
-          if (diffMinutos !== 0) updates.minutosJugados = increment(diffMinutos);
-          if (diffGoles !== 0) updates.golesFavor = increment(diffGoles);
-          if (diffGolesContra !== 0) updates.golesContra = increment(diffGolesContra);
-          if (diffAsistencias !== 0) updates.asistencias = increment(diffAsistencias);
-          if (diffAmarillas !== 0) updates.tarjetasAmarillas = increment(diffAmarillas);
-          if (diffRojas !== 0) updates.tarjetasRojas = increment(diffRojas);
-          if (diffConvocado !== 0) updates.partidosConvocados = increment(diffConvocado);
-        } else {
-          if (playerOld.minutos > 0) updates.minutosJugados = increment(-playerOld.minutos);
-          if (playerOld.goles > 0) updates.golesFavor = increment(-playerOld.goles);
-          if (playerOld.golesContra > 0) updates.golesContra = increment(-playerOld.golesContra);
-          if (playerOld.asistencias > 0) updates.asistencias = increment(-playerOld.asistencias);
-          if (playerOld.amarillas > 0) updates.tarjetasAmarillas = increment(-playerOld.amarillas);
-          if (playerOld.rojas > 0) updates.tarjetasRojas = increment(-playerOld.rojas);
-          if (playerOld.convocado) updates.partidosConvocados = increment(-1);
-        }
-
-        let diffMvp = 0;
-        if (oldMvpId === jugadorId && newMvpId !== jugadorId) {
-          diffMvp = -1;
-        } else if (oldMvpId !== jugadorId && newMvpId === jugadorId) {
-          diffMvp = 1;
-        }
-        if (diffMvp !== 0) {
-          updates.mvps = increment(diffMvp);
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await updateDoc(playerRef, updates);
-        }
-      }
-
+      // Guardar en Firestore: tanto el acta como el campo 'confirmado' para futuros diffs
       const matchRef = doc(db, "partidos", match.id);
       await updateDoc(matchRef, {
         actaGuardada: true,
         cronica: cronica.trim(),
         mvpJugadorId: newMvpId || null,
-        alineacion: {
-          formacion,
-          asignaciones,
-          suplentes
-        },
+        alineacion: { formacion, asignaciones, suplentes },
         statsJugadores: newStats,
+        statsJugadoresConfirmados: newStats, // baseline fiable para futuros diffs
+        golesCamarma,
+        golesRival,
         jugado: true
       });
 
+      // Actualizar baseline para futuros diffs
+      lastConfirmedStatsRef.current = { ...newStats };
+      lastConfirmedMvpRef.current = newMvpId;
+      actaConfirmadaEnSesionRef.current = true;
       setGuardado(true);
     } catch (err) {
       console.error(err);
@@ -579,6 +1162,36 @@ export default function ActaPartido({ match, jugadores, onClose }) {
     } finally {
       setGuardando(false);
     }
+  };
+
+  // Cerrar: sincroniza plantilla automáticamente si no se había confirmado
+  const handleClose = async () => {
+    if (!actaConfirmadaEnSesionRef.current) {
+      const oldStats = lastConfirmedStatsRef.current;
+      const newStats = statsJugadores;
+      const oldMvpId = lastConfirmedMvpRef.current;
+      const newMvpId = mvpJugadorId || "";
+
+      // Comprobamos si hay algo que sincronizar (evitar escrituras innecesarias)
+      const hayDiferencias = JSON.stringify(oldStats) !== JSON.stringify(newStats) || oldMvpId !== newMvpId;
+      if (hayDiferencias) {
+        setCerrando(true);
+        try {
+          await syncPlayerStats(oldStats, newStats, oldMvpId, newMvpId);
+          const matchRef = doc(db, "partidos", match.id);
+          await updateDoc(matchRef, {
+            actaGuardada: true,
+            jugado: true,
+            statsJugadoresConfirmados: newStats // baseline fiable para futuros diffs
+          });
+        } catch (e) {
+          console.error("Error al sincronizar al cerrar:", e);
+        } finally {
+          setCerrando(false);
+        }
+      }
+    }
+    onClose();
   };
 
   const exportMatchToPDF = () => {
@@ -609,7 +1222,11 @@ export default function ActaPartido({ match, jugadores, onClose }) {
         rojas: stats.rojas || 0,
         convocado: stats.convocado ? "Sí" : "No",
         tipo: esTitular ? "Titular" : "Suplente",
-        isPortero: p ? (p.isPortero || p.posicion === "Portero") : false
+        isPortero: p ? (p.isPortero || p.posicion === "Portero") : false,
+        golesDetalle: stats.golesDetalle || [],
+        asistenciasDetalle: stats.asistenciasDetalle || [],
+        amarillasDetalle: stats.amarillasDetalle || [],
+        rojasDetalle: stats.rojasDetalle || []
       };
     };
 
@@ -629,10 +1246,32 @@ export default function ActaPartido({ match, jugadores, onClose }) {
         <td class="text-slate-500">${r.posicion}</td>
         <td class="text-center font-bold">${r.tipo}</td>
         <td class="text-center">${r.minutos}'</td>
-        <td class="text-center font-semibold text-emerald-600">${r.isPortero ? `${r.golesContra} (Recibidos)` : (r.goles > 0 ? `⚽ ${r.goles}` : "-")}</td>
-        <td class="text-center">${r.asistencias > 0 ? `👟 ${r.asistencias}` : "-"}</td>
-        <td class="text-center">${r.amarillas > 0 ? Array.from({ length: r.amarillas }).map(() => "🟨").join("") : ""}</td>
-        <td class="text-center">${r.rojas > 0 ? "🟥" : ""}</td>
+        <td class="text-center font-semibold text-emerald-600">
+          ${r.isPortero 
+            ? `${r.golesContra} (Recibidos)` 
+            : (r.goles > 0 
+              ? `⚽ ${r.goles} ${r.golesDetalle.length > 0 ? `<div style="font-size:10px; color:#64748b; font-weight:normal; margin-top:2px;">(${r.golesDetalle.map(gd => `${gd.minuto === "?" ? "?" : `${gd.minuto}'`}${gd.penalti ? " (p)" : ""}`).join(', ')})</div>` : ''}` 
+              : "-")}
+        </td>
+        <td class="text-center">
+          ${r.asistencias > 0 
+            ? `👟 ${r.asistencias} ${r.asistenciasDetalle.length > 0 ? `<div style="font-size:10px; color:#64748b; font-weight:normal; margin-top:2px;">(${r.asistenciasDetalle.map(ad => `${ad.minuto === "?" ? "?" : `${ad.minuto}'`}`).join(', ')})</div>` : ''}` 
+            : "-"}
+        </td>
+        <td class="text-center">
+          ${r.amarillas > 0
+            ? `🟨 ${r.amarillas > 1 ? `x${r.amarillas} ` : ''}${r.amarillasDetalle.length > 0
+              ? `<div style="font-size:10px; color:#92400e; font-weight:normal; margin-top:2px;">(${r.amarillasDetalle.map(a => a.minuto === '?' ? '?' : `${a.minuto}'`).join(', ')})</div>`
+              : ''}`
+            : '-'}
+        </td>
+        <td class="text-center">
+          ${r.rojas > 0
+            ? `🟥 ${r.rojasDetalle.length > 0
+              ? `<div style="font-size:10px; color:#991b1b; font-weight:normal; margin-top:2px;">(${r.rojasDetalle.map(rj => rj.minuto === '?' ? '?' : `${rj.minuto}'`).join(', ')})</div>`
+              : ''}`
+            : '-'}
+        </td>
       </tr>
     `).join("");
 
@@ -762,7 +1401,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
               <strong>Fecha:</strong> ${new Date(match.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </div>
             <div class="meta-item">
-              <strong>Resultado:</strong> ${match.condicion === "visitante" ? `${match.golesRival} - ${match.golesCamarma}` : `${match.golesCamarma} - ${match.golesRival}`}<br/>
+              <strong>Resultado:</strong> ${match.condicion === "visitante" ? `${golesRival} - ${golesCamarma}` : `${golesCamarma} - ${golesRival}`}<br/>
               <strong>Formación táctica:</strong> ${formacion || "N/A"}<br/>
               <strong>Estado:</strong> Finalizado
             </div>
@@ -815,7 +1454,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-slate-955 flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-40 bg-slate-950 flex flex-col overflow-hidden">
       
       {/* Cabecera Principal */}
       <header className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800/80 px-6 py-4 flex items-center justify-between shrink-0 shadow-lg backdrop-blur-md sticky top-0 z-40">
@@ -839,10 +1478,15 @@ export default function ActaPartido({ match, jugadores, onClose }) {
             📥 Exportar PDF
           </button>
           <button
-            onClick={onClose}
-            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer border border-slate-800 transition-colors active:scale-95 shrink-0"
+            onClick={handleClose}
+            disabled={cerrando}
+            className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer border border-slate-800 transition-colors active:scale-95 shrink-0 disabled:opacity-60 disabled:cursor-wait relative"
+            title={cerrando ? "Sincronizando plantilla..." : "Cerrar acta"}
           >
-            <X className="w-5 h-5" />
+            {cerrando
+              ? <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+              : <X className="w-5 h-5" />
+            }
           </button>
         </div>
       </header>
@@ -964,12 +1608,65 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                   {suplentes.length < 9 && (
                     <button
                       onClick={() => setSelectorSlot("suplente")}
-                      className="flex items-center gap-1.5 bg-slate-955/30 hover:bg-camarma-blue/15 border border-dashed border-slate-800 hover:border-camarma-blue rounded-2xl px-4 py-2 text-xs font-bold text-slate-400 hover:text-white cursor-pointer transition-all duration-300 select-none"
+                      className="flex items-center gap-1.5 bg-slate-950/30 hover:bg-camarma-blue/15 border border-dashed border-slate-800 hover:border-camarma-blue rounded-2xl px-4 py-2 text-xs font-bold text-slate-400 hover:text-white cursor-pointer transition-all duration-300 select-none"
                     >
                       + Añadir suplente
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* Jugadores No Convocados Card */}
+              <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-5 shadow-xl backdrop-blur-md space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                    <UserX className="w-4.5 h-4.5 text-red-400" />
+                    No Convocados ({jugadoresLibres.length})
+                  </h4>
+                  <span className="text-[9px] text-slate-500 font-bold">Disponibles en plantilla</span>
+                </div>
+                {jugadoresLibres.length === 0 ? (
+                  <p className="text-slate-500 text-xs italic">Todos los jugadores están convocados.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1">
+                    {jugadoresLibres.map(jug => (
+                      <div
+                        key={jug.id}
+                        className="flex items-center justify-between bg-slate-950/40 border border-slate-850/60 rounded-2xl p-2.5 transition-all hover:border-slate-700/50"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {jug.fotoUrl ? (
+                            <img src={jug.fotoUrl} alt={jug.nombre} className="w-8 h-8 rounded-full object-cover border border-slate-850" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-750">
+                              <User className="w-4 h-4 text-slate-500" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-200 block truncate leading-tight">
+                              {jug.nombre}
+                            </span>
+                            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block mt-0.5">
+                              {jug.posicion || (jug.isPortero ? "Portero" : "Jugador")}
+                              {jug.lesionado && (
+                                <span className="text-red-450 ml-1.5 font-extrabold text-[8px] bg-red-950/40 px-1 py-0.2 rounded border border-red-900/30">
+                                  🩹 Lesionado
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => tryAddSuplente(jug.id)}
+                          className="bg-camarma-blue/15 hover:bg-camarma-blue border border-camarma-blue/30 hover:border-camarma-blue text-camarma-blue-light hover:text-white text-[10px] font-bold px-2 py-1 rounded-xl transition-all cursor-pointer select-none shrink-0"
+                          title="Convocarlo al Banquillo"
+                        >
+                          + Banquillo
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Resumen del Acta / Estadísticas Individuales Card */}
@@ -1019,7 +1716,12 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                               {s.minutos}'
                             </span>
                             {!esPortero && s.goles > 0 && (
-                              <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                              <span 
+                                className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20 cursor-help"
+                                title={s.golesDetalle && s.golesDetalle.length > 0 
+                                  ? s.golesDetalle.map(gd => (gd.minuto === "?" ? "?" : gd.minuto + "'") + (gd.penalti ? " (P)" : "")).join(', ')
+                                  : "Goles"}
+                              >
                                 ⚽ {s.goles}
                               </span>
                             )}
@@ -1029,7 +1731,12 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                               </span>
                             )}
                             {s.asistencias > 0 && (
-                              <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                              <span 
+                                className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20 cursor-help"
+                                title={s.asistenciasDetalle && s.asistenciasDetalle.length > 0 
+                                  ? s.asistenciasDetalle.map(ad => ad.minuto === "?" ? "?" : ad.minuto + "'").join(', ')
+                                  : "Asistencias"}
+                              >
                                 👟 {s.asistencias}
                               </span>
                             )}
@@ -1061,6 +1768,34 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                 <h3 className="text-xs font-black uppercase tracking-wider text-camarma-gold border-b border-slate-850 pb-2 flex items-center gap-2">
                   📝 Detalles Post-Partido (Cuerpo Técnico)
                 </h3>
+
+                {/* Marcador del Partido */}
+                <div className="grid grid-cols-2 gap-4 bg-slate-950/45 p-4 rounded-2xl border border-slate-850/60 text-left">
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      ⚽ Goles Camarma
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={golesCamarma}
+                      onChange={(e) => setGolesCamarma(parseInt(e.target.value) || 0)}
+                      className="w-full bg-slate-900 border border-slate-800 text-white text-center rounded-xl py-2.5 text-lg font-black outline-none focus:border-camarma-blue font-mono"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      ⚽ Goles Rival
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={golesRival}
+                      onChange={(e) => setGolesRival(parseInt(e.target.value) || 0)}
+                      className="w-full bg-slate-900 border border-slate-800 text-white text-center rounded-xl py-2.5 text-lg font-black outline-none focus:border-camarma-blue font-mono"
+                    />
+                  </div>
+                </div>
                 
                 {/* Nominar MVP */}
                 <div className="space-y-2">
@@ -1073,11 +1808,11 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                       onChange={(e) => setMvpJugadorId(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800/80 text-white rounded-2xl px-4 py-3.5 text-sm outline-none focus:border-camarma-blue cursor-pointer appearance-none font-medium"
                     >
-                      <option value="">-- Selecciona al MVP del encuentro --</option>
+                      <option value="" className="bg-slate-900 text-white">-- Selecciona al MVP del encuentro --</option>
                       {[...Object.values(asignaciones).filter(Boolean), ...suplentes].map(pid => {
                         const p = getJugador(pid);
                         return p ? (
-                          <option key={pid} value={pid}>
+                          <option key={pid} value={pid} className="bg-slate-900 text-white">
                             {p.nombre} ({p.posicion || (p.isPortero ? "Portero" : "Jugador")})
                           </option>
                         ) : null;
@@ -1106,10 +1841,30 @@ export default function ActaPartido({ match, jugadores, onClose }) {
 
               {/* Botón de Guardado y Confirmar */}
               <div className="space-y-3">
+                {/* Indicador de autoguardado */}
+                {autoSaveStatus && (
+                  <div className={`flex items-center justify-center gap-2 text-xs font-bold py-2 rounded-xl transition-all animate-in fade-in duration-300 ${
+                    autoSaveStatus === 'saving'
+                      ? 'text-slate-400 bg-slate-850/50'
+                      : 'text-emerald-400 bg-emerald-950/30 border border-emerald-900/30'
+                  }`}>
+                    {autoSaveStatus === 'saving' ? (
+                      <>
+                        <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Guardando cambios...
+                      </>
+                    ) : (
+                      <>✅ Guardado automáticamente</>
+                    )}
+                  </div>
+                )}
                 {error && <p className="text-red-400 text-sm font-bold text-center">{error}</p>}
                 {guardado ? (
                   <div className="w-full py-4.5 bg-emerald-600/20 border border-emerald-500/40 rounded-2xl text-emerald-400 font-extrabold text-center text-sm shadow-md animate-in fade-in duration-300">
-                    ✅ Acta guardada y estadísticas actualizadas con éxito
+                    ✅ Estadísticas de plantilla actualizadas con éxito
                   </div>
                 ) : (
                   <button
@@ -1123,7 +1878,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                         </svg>
-                        Guardando estadísticas...
+                        Actualizando estadísticas...
                       </>
                     ) : (
                       <>
@@ -1143,7 +1898,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
 
       {/* MODAL DE SELECCIÓN DE JUGADOR PARA UN SLOT */}
       {selectorSlot && (
-        <div className="fixed inset-0 z-50 bg-slate-955/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-md shadow-2xl max-h-[75vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-850">
               <h4 className="font-black text-white text-sm uppercase tracking-wide">Seleccionar Jugador</h4>
@@ -1162,7 +1917,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
                 jugadoresLibres.map(jug => (
                   <button
                     key={jug.id}
-                    onClick={() => selectorSlot === "suplente" ? addSuplente(jug.id) : asignarJugador(selectorSlot, jug.id)}
+                    onClick={() => selectorSlot === "suplente" ? tryAddSuplente(jug.id) : tryAsignarJugador(selectorSlot, jug.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-slate-800/60 transition-colors cursor-pointer text-left group"
                   >
                     {jug.fotoUrl ? (
@@ -1215,6 +1970,69 @@ export default function ActaPartido({ match, jugadores, onClose }) {
             setModalSlot(null);
           } : null}
         />
+      )}
+
+      {/* Modal personalizado para confirmar el alta médica */}
+      {pendingDischarge && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden max-h-[90vh] animate-in zoom-in-95 duration-200">
+            {/* Cabecera */}
+            <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-800 bg-slate-900">
+              <div className="w-10 h-10 rounded-full bg-red-950/30 flex items-center justify-center border border-red-900/35 shadow-md">
+                <span className="text-lg">🩹</span>
+              </div>
+              <div className="text-left font-sans">
+                <h4 className="font-black text-white text-base leading-tight">Jugador Lesionado</h4>
+                <span className="inline-block text-[9px] font-black uppercase text-red-400 tracking-widest mt-0.5">
+                  Confirmación de Convocatoria
+                </span>
+              </div>
+            </div>
+
+            {/* Cuerpo */}
+            <div className="p-6 space-y-4 text-left font-sans">
+              <p className="text-sm text-slate-300 leading-relaxed">
+                ¿Estás seguro de que quieres meter en la plantilla a <strong className="text-white">{pendingDischarge.player.nombre}</strong>?
+              </p>
+              <div className="bg-slate-950/40 border border-slate-850/60 p-3.5 rounded-2xl">
+                <span className="block text-[9px] font-extrabold uppercase text-slate-500 mb-1">Estado Médico Activo</span>
+                <p className="text-xs text-red-450 font-bold flex items-center gap-1.5">
+                  ⚠️ {pendingDischarge.player.tipoLesion || "Lesión de evolución pendiente"} (Baja desde el {pendingDischarge.player.fechaBaja})
+                </p>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Al confirmar, se le dará <strong className="text-slate-200">de alta automáticamente</strong> con fecha de hoy, calculando su periodo de recuperación y archivando su historial clínico.
+              </p>
+            </div>
+
+            {/* Pie */}
+            <div className="p-6 border-t border-slate-800 bg-slate-950/20 flex gap-3">
+              <button
+                onClick={pendingDischarge.onCancel}
+                className="flex-1 bg-slate-900/80 hover:bg-slate-850 border border-slate-800 hover:border-slate-750 text-slate-355 hover:text-white font-extrabold text-xs py-3.5 px-4 rounded-xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider font-sans"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={pendingDischarge.onConfirm}
+                className="flex-1 bg-gradient-to-r from-camarma-gold to-yellow-600 hover:from-yellow-650 hover:to-yellow-700 text-slate-950 font-black text-xs py-3.5 px-4 rounded-xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider font-sans shadow-lg shadow-camarma-gold/10"
+              >
+                Confirmar y Convocar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-[110] flex items-center gap-2.5 px-4 py-3.5 rounded-2xl shadow-xl border animate-in slide-in-from-bottom-5 duration-300 ${
+          toast.type === 'error' 
+            ? 'bg-red-955/90 border-red-500/30 text-red-400' 
+            : toast.type === 'warning'
+            ? 'bg-amber-950/90 border-amber-500/30 text-amber-400'
+            : 'bg-emerald-950/90 border-emerald-500/30 text-emerald-400'
+        }`}>
+          <span className="text-xs font-bold font-sans uppercase tracking-wider">{toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : '✅'} {toast.message}</span>
+        </div>
       )}
     </div>
   );

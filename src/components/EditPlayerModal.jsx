@@ -271,10 +271,10 @@ export default function EditPlayerModal({ player, onClose }) {
                 className="w-full bg-slate-900 border border-slate-700/80 focus:border-camarma-blue focus:ring-1 focus:ring-camarma-blue text-white rounded-xl px-4 py-3.5 text-base outline-none"
                 disabled={loading}
               >
-                <option value="Delantero">⚽ Delantero</option>
-                <option value="Centrocampista">🪄 Centrocampista</option>
-                <option value="Defensa">🛡️ Defensa</option>
-                <option value="Portero">🧤 Portero</option>
+                <option value="Delantero" className="bg-slate-900 text-white">⚽ Delantero</option>
+                <option value="Centrocampista" className="bg-slate-900 text-white">🪄 Centrocampista</option>
+                <option value="Defensa" className="bg-slate-900 text-white">🛡️ Defensa</option>
+                <option value="Portero" className="bg-slate-900 text-white">🧤 Portero</option>
               </select>
             </div>
           </div>
