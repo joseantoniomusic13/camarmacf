@@ -22,5 +22,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    // Reglas para la colección de entrenamientos
+    match /entrenamientos/{entrenamientoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }
