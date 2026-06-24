@@ -89,6 +89,42 @@ export default function PublicView({ onAdminClick, isAdmin }) {
   const [entrenamientos, setEntrenamientos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedMatchDetails, setSelectedMatchDetails] = useState(null);
+  const [calendarDate, setCalendarDate] = useState(new Date());
+
+  // Helpers del calendario (solo lectura)
+  const getDaysInMonth = (year, month) => {
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const startOffset = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
+    const numDays = new Date(year, month + 1, 0).getDate();
+    const numDaysPrev = new Date(year, month, 0).getDate();
+    const days = [];
+    for (let i = startOffset - 1; i >= 0; i--) {
+      const prevDay = numDaysPrev - i;
+      const prevMonth = month === 0 ? 12 : month;
+      const prevYear = month === 0 ? year - 1 : year;
+      days.push({ day: prevDay, isCurrentMonth: false, dateStr: `${prevYear}-${String(prevMonth).padStart(2,'0')}-${String(prevDay).padStart(2,'0')}` });
+    }
+    for (let i = 1; i <= numDays; i++) {
+      days.push({ day: i, isCurrentMonth: true, dateStr: `${year}-${String(month+1).padStart(2,'0')}-${String(i).padStart(2,'0')}` });
+    }
+    const totalCells = days.length <= 35 ? 35 : 42;
+    const remaining = totalCells - days.length;
+    for (let i = 1; i <= remaining; i++) {
+      const nextMonth = month === 11 ? 1 : month + 2;
+      const nextYear = month === 11 ? year + 1 : year;
+      days.push({ day: i, isCurrentMonth: false, dateStr: `${nextYear}-${String(nextMonth).padStart(2,'0')}-${String(i).padStart(2,'0')}` });
+    }
+    return days;
+  };
+
+  const getTrainingForDate = (dateStr) => entrenamientos.find(t => t.fecha === dateStr);
+
+  const isPreScheduledTrainingDay = (dateStr) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr + 'T00:00:00');
+    const day = d.getDay();
+    return day === 2 || day === 4 || day === 5; // Mar, Jue, Vie
+  };
 
   // Escuchar jugadores en tiempo real
   useEffect(() => {
@@ -932,138 +968,167 @@ export default function PublicView({ onAdminClick, isAdmin }) {
 
         {/* PESTAÑA: ENTRENAMIENTOS */}
         {activeTab === "entrenamientos" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in duration-300">
-            {/* Info Horario y Campo */}
-            <div className="lg:col-span-1 bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 sm:p-6 shadow-xl backdrop-blur-md flex flex-col justify-between h-fit gap-4">
+          <div className="space-y-6 animate-in fade-in duration-300">
+
+            {/* Cabecera informativa */}
+            <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-base font-bold text-white uppercase tracking-wider mb-4 border-b border-slate-700/60 pb-3 flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-camarma-gold" />
-                  Horario de Entrenamientos
+                <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-camarma-gold" />
+                  Entrenamientos Oficiales
                 </h3>
-
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl shrink-0 mt-0.5">📅</span>
-                    <div>
-                      <h4 className="text-sm font-bold text-white">Días de la semana</h4>
-                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                        Martes, Jueves y Viernes
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl shrink-0 mt-0.5">⏱️</span>
-                    <div>
-                      <h4 className="text-sm font-bold text-white">Hora oficial</h4>
-                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                        20:00 - 22:00 horas
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl shrink-0 mt-0.5">📍</span>
-                    <div>
-                      <h4 className="text-sm font-bold text-white">Instalaciones</h4>
-                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                        Campo Municipal de Fútbol de Camarma de Esteruelas
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                <p className="text-xs text-slate-400">Horario habitual: Martes, Jueves y Viernes de 20:00 a 22:00 · Campo Municipal de Camarma de Esteruelas</p>
               </div>
-
-              <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/50">
-                <span className="text-[10px] font-extrabold uppercase text-camarma-gold tracking-widest block mb-1">
-                  Nota del vestuario
-                </span>
-                <p className="text-xs text-slate-400 leading-relaxed italic">
-                  "La asistencia y puntualidad a los entrenamientos son indispensables para las convocatorias del fin de semana."
-                </p>
+              <div className="shrink-0 bg-slate-900/60 px-4 py-2.5 rounded-2xl border border-slate-800/50 text-center">
+                <span className="text-[10px] font-extrabold uppercase text-camarma-gold tracking-widest block mb-0.5">Nota</span>
+                <p className="text-[11px] text-slate-400 italic">"La asistencia es clave para las convocatorias."</p>
               </div>
             </div>
 
-            {/* Historial de Notas y Ausencias */}
-            <div className="lg:col-span-2 bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 sm:p-6 shadow-xl backdrop-blur-md space-y-6">
-              <h3 className="text-base font-bold text-white uppercase tracking-wider border-b border-slate-700/60 pb-3 flex items-center gap-2">
-                <ClipboardList className="w-5 h-5 text-camarma-gold" />
-                Diario del Entrenador
-              </h3>
-
-              {entrenamientos.length === 0 ? (
-                <div className="text-center py-10 bg-slate-900/40 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">
-                  No se han registrado sesiones de entrenamiento en el diario.
+            {/* Calendario de solo lectura */}
+            <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-700/40 pb-3">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  📅 Calendario de Entrenamientos
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))}
+                    className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 rounded-xl cursor-pointer active:scale-95 transition-all text-xs font-bold"
+                  >◀</button>
+                  <span className="text-xs font-bold text-white uppercase min-w-[130px] text-center capitalize">
+                    {calendarDate.toLocaleDateString("es-ES", { month: "long", year: "numeric" })}
+                  </span>
+                  <button
+                    onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1))}
+                    className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 rounded-xl cursor-pointer active:scale-95 transition-all text-xs font-bold"
+                  >▶</button>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {entrenamientos.map((session) => {
-                    const absents = session.faltas || [];
+              </div>
+
+              {/* Leyenda */}
+              <div className="flex flex-wrap gap-4 text-[10px] font-bold text-slate-400 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 bg-camarma-blue/15 border border-camarma-blue rounded" />
+                  <span>Sesión Registrada</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 bg-slate-900/40 border border-dashed border-amber-500/50 rounded" />
+                  <span>Entrenamiento Planificado</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base leading-none">⚽</span>
+                  <span>Partido</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-3 bg-slate-950/20 border border-slate-800 rounded" />
+                  <span>Día Libre</span>
+                </div>
+              </div>
+
+              {/* Cabecera días de la semana */}
+              <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-slate-400 mb-2">
+                <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+              </div>
+
+              {/* Grid días */}
+              <div className="grid grid-cols-7 gap-1.5">
+                {getDaysInMonth(calendarDate.getFullYear(), calendarDate.getMonth()).map((cell, idx) => {
+                  const session = getTrainingForDate(cell.dateStr);
+                  const isPlan = isPreScheduledTrainingDay(cell.dateStr);
+                  const partido = cell.dateStr ? partidos.find(p => p.fecha === cell.dateStr) : null;
+
+                  let partidoInfo = null;
+                  if (partido && cell.isCurrentMonth) {
+                    const gc = partido.golesCamarma ?? null;
+                    const gr = partido.golesRival ?? null;
+                    const played = gc !== null && gr !== null && partido.jugado;
+                    if (played) {
+                      const ganamos = gc > gr;
+                      const perdimos = gc < gr;
+                      const img = ganamos ? './victoria.png' : perdimos ? './derrota.png' : './empate.png';
+                      const scoreDisplay = partido.condicion === 'visitante' ? `${gr} - ${gc}` : `${gc} - ${gr}`;
+                      const label = ganamos ? 'Victoria' : perdimos ? 'Derrota' : 'Empate';
+                      const labelColor = ganamos ? 'text-emerald-300' : perdimos ? 'text-red-300' : 'text-slate-300';
+                      partidoInfo = { img, scoreDisplay, label, labelColor, played: true, rival: partido.rival };
+                    } else {
+                      partidoInfo = { played: false, rival: partido.rival };
+                    }
+                  }
+
+                  // Celda partido con resultado
+                  if (partidoInfo?.played) {
                     return (
                       <div
-                        key={session.id}
-                        className="bg-slate-900/60 border border-slate-800/50 rounded-2xl p-4 flex flex-col gap-3"
+                        key={idx}
+                        className="relative rounded-2xl overflow-hidden border border-slate-700/60 select-none"
+                        style={{ aspectRatio: '1 / 1' }}
                       >
-                        {/* Fecha */}
-                        <div className="flex items-center justify-between border-b border-slate-800/40 pb-2">
-                          <div className="flex items-center gap-3">
-                            <div className="bg-slate-800 border border-slate-700 px-2 py-1.5 rounded-lg text-center min-w-[55px] shrink-0">
-                              <span className="block text-[8px] font-bold text-camarma-gold uppercase leading-none">
-                                {new Date(session.fecha + "T00:00:00").toLocaleDateString("es-ES", { month: "short" })}
-                              </span>
-                              <span className="block text-base font-black text-white leading-none mt-0.5">
-                                {new Date(session.fecha + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric" })}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] bg-slate-800 border border-slate-750 px-2 py-0.5 rounded text-slate-400 font-bold uppercase tracking-wide">
-                                {new Date(session.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: "long" })}
-                              </span>
-                              {session.notes && (
-                                <p className="text-[10px] text-slate-500 mt-0.5">Entrenamiento completado</p>
-                              )}
-                            </div>
+                        <img src={partidoInfo.img} alt={partidoInfo.label} className="absolute inset-0 w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/30 to-black/80" />
+                        <div className="relative z-10 flex flex-col justify-between h-full p-1.5">
+                          <span className="text-[10px] font-extrabold text-white/90 drop-shadow">{cell.day}</span>
+                          <div className="text-center">
+                            <div className="text-[11px] font-black text-white drop-shadow leading-none">{partidoInfo.scoreDisplay}</div>
+                            <div className={`text-[7px] font-black uppercase tracking-wider drop-shadow mt-0.5 ${partidoInfo.labelColor}`}>{partidoInfo.label}</div>
                           </div>
                         </div>
-
-                        {/* Notas del entrenamiento */}
-                        {session.notas && (
-                          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-slate-900/40 p-3 rounded-xl border border-slate-850">
-                            {session.notas}
-                          </p>
+                        {session && (
+                          <div className="absolute top-1 right-1 z-10">
+                            <img src="./escudo.webp" alt="" className="w-4 h-4 object-contain opacity-80" />
+                          </div>
                         )}
+                      </div>
+                    );
+                  }
 
-                        {/* Bajas / Ausentes */}
-                        <div>
-                          <span className="block text-[9px] font-extrabold uppercase text-slate-500 mb-1">
-                            Bajas de la sesión ({absents.length})
-                          </span>
-                          {absents.length === 0 ? (
-                            <span className="text-[10px] text-emerald-450 font-bold bg-emerald-950/15 border border-emerald-900/10 px-2.5 py-0.5 rounded-md inline-block">
-                              ✔️ 100% Asistencia
-                            </span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {absents.map(pid => {
-                                const p = jugadores.find(j => j.id === pid);
-                                return (
-                                  <span
-                                    key={pid}
-                                    className="text-[10px] font-semibold bg-red-950/20 border border-red-900/30 text-red-400 px-2 py-0.5 rounded-md"
-                                  >
-                                    {p ? p.nombre : "Jugador"}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
+                  // Celda partido pendiente
+                  if (partidoInfo && !partidoInfo.played) {
+                    return (
+                      <div
+                        key={idx}
+                        className="relative aspect-square rounded-2xl flex flex-col justify-between p-2 border border-slate-600/60 bg-slate-850/40 text-slate-300 select-none"
+                      >
+                        <span className="text-[10px] font-extrabold">{cell.day}</span>
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-base leading-none">⚽</span>
+                          <span className="text-[7px] font-black uppercase text-slate-400 truncate max-w-full text-center leading-tight">{partidoInfo.rival}</span>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              )}
+                  }
+
+                  // Celdas normales
+                  let cellClasses = "relative aspect-square rounded-2xl flex flex-col justify-between p-2 border text-left select-none ";
+                  if (!cell.isCurrentMonth) {
+                    cellClasses += "opacity-35 bg-slate-900/20 border-slate-850 text-slate-600";
+                  } else if (session) {
+                    cellClasses += "bg-camarma-blue/10 border-camarma-blue/60 text-white";
+                  } else if (isPlan) {
+                    cellClasses += "border-dashed border-amber-500/35 bg-slate-900/40 text-slate-300";
+                  } else {
+                    cellClasses += "border-slate-800/80 bg-slate-950/20 text-slate-450";
+                  }
+
+                  return (
+                    <div key={idx} className={cellClasses}>
+                      {session && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-25 z-0">
+                          <img src="./escudo.webp" alt="" className="w-8 h-8 object-contain" />
+                        </div>
+                      )}
+                      <span className="relative z-10 text-[10px] font-extrabold">{cell.day}</span>
+                      {session && (
+                        <span className="relative z-10 text-[8px] font-black uppercase text-camarma-gold leading-tight tracking-wider truncate max-w-full">
+                          {session.faltas && session.faltas.length > 0 ? `❌ ${session.faltas.length} Faltas` : "✔️ 100% Ok"}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+
           </div>
         )}
 
