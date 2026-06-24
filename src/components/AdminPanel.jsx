@@ -28,10 +28,12 @@ import {
   ChevronUp,
   ClipboardCheck,
   ClipboardList,
-  Eye
+  Eye,
+  Pencil
 } from "lucide-react";
 import AddPlayerForm from "./AddPlayerForm";
 import ActaPartido from "./ActaPartido";
+import EditPlayerModal from "./EditPlayerModal";
 
 const calcularEdad = (fechaNac) => {
   if (!fechaNac) return "N/A";
@@ -53,6 +55,7 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [editingPlayer, setEditingPlayer] = useState(null); // Jugador que se está editando
 
   // Estados para entrenamientos
   const [entrenamientos, setEntrenamientos] = useState([]);
@@ -563,6 +566,13 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
 
   return (
     <>
+    {/* Modal de Edición de Jugador */}
+    {editingPlayer && (
+      <EditPlayerModal
+        player={editingPlayer}
+        onClose={() => setEditingPlayer(null)}
+      />
+    )}
     <div className="flex-1 flex flex-col min-h-screen bg-slate-900 pb-20">
       
       {/* Cabecera Fija del Panel */}
@@ -1067,14 +1077,21 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
                               )}
                             </div>
 
-                            {/* Eliminar Jugador */}
-                            <div className="flex justify-end mt-4 pt-3 border-t border-slate-700/50">
+                            {/* Acciones del Jugador: Editar y Eliminar */}
+                            <div className="flex justify-between items-center mt-4 pt-3 border-t border-slate-700/50 gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setEditingPlayer(player); }}
+                                className="flex items-center gap-1.5 bg-blue-950/20 hover:bg-blue-900/35 border border-blue-900/30 hover:border-blue-700/50 text-blue-400 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all"
+                              >
+                                <Pencil className="w-4 h-4" />
+                                Editar Jugador
+                              </button>
                               <button
                                 onClick={() => handleDeletePlayer(player)}
                                 className="flex items-center gap-1.5 bg-red-950/20 hover:bg-red-900/35 border border-red-900/30 hover:border-red-700/50 text-red-400 text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all"
                               >
                                 <Trash2 className="w-4 h-4" />
-                                Despedir / Eliminar Jugador
+                                Despedir
                               </button>
                             </div>
 
