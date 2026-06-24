@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme {
+  --color-camarma-blue-dark: #0f172a;
+  --color-camarma-blue: #1e3a8a;
+  --color-camarma-blue-light: #3b82f6;
+  --color-camarma-gold: #eab308;
+  --color-camarma-gold-dark: #ca8a04;
+  
+  --font-sans: "Inter", "Outfit", system-ui, -apple-system, sans-serif;
+}
+
+/* Optimizaciones táctiles y móviles globales */
+@layer base {
+  html, body {
+    overscroll-behavior-y: contain; /* Prevenir rebote de scroll molesto */
+    -webkit-tap-highlight-color: transparent; /* Quitar destello gris al pulsar en iOS */
+  }
+
+  /* Botones y elementos táctiles interactivos */
+  button, [role="button"] {
+    touch-action: manipulation; /* Evita retardo de 300ms al pulsar */
+    user-select: none; /* Evita que se seleccione texto al mantener pulsado */
+  }
+
+  /* Scrollbar personalizado premium */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1e3a8a;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3b82f6;
+  }
+}
