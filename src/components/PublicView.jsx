@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { Shield, Calendar, Award, LogIn, Trophy, Clock, Heart, AlertCircle, ClipboardList, User, Activity, TrendingUp, X, ArrowLeftRight } from "lucide-react";
 
 const calcularEdad = (fechaNac) => {
@@ -90,6 +90,7 @@ export default function PublicView({ onAdminClick, isAdmin }) {
   const [loading, setLoading] = useState(true);
   const [selectedMatchDetails, setSelectedMatchDetails] = useState(null);
   const [calendarDate, setCalendarDate] = useState(new Date());
+  const [temporadaConfig, setTemporadaConfig] = useState(null); // { nombre, fechaInicio }
 
   // Helpers del calendario (solo lectura)
   const getDaysInMonth = (year, month) => {
@@ -121,6 +122,8 @@ export default function PublicView({ onAdminClick, isAdmin }) {
 
   const isPreScheduledTrainingDay = (dateStr) => {
     if (!dateStr) return false;
+    // No mostrar como planificado si es anterior al inicio de temporada
+    if (temporadaConfig?.fechaInicio && dateStr < temporadaConfig.fechaInicio) return false;
     const d = new Date(dateStr + 'T00:00:00');
     const day = d.getDay();
     return day === 2 || day === 4 || day === 5; // Mar, Jue, Vie
@@ -168,6 +171,20 @@ export default function PublicView({ onAdminClick, isAdmin }) {
       setEntrenamientos(tList);
     }, (error) => {
       console.error("Error cargando vista pública de entrenamientos: ", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Escuchar configuración de temporada activa
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, "config", "temporada"), (snapshot) => {
+      if (snapshot.exists()) {
+        setTemporadaConfig(snapshot.data());
+      } else {
+        setTemporadaConfig(null);
+      }
+    }, (error) => {
+      console.error("Error cargando config de temporada en vista pública: ", error);
     });
     return () => unsubscribe();
   }, []);
@@ -475,6 +492,14 @@ export default function PublicView({ onAdminClick, isAdmin }) {
         <span className="mt-4 px-3 py-1 bg-camarma-blue/10 border border-camarma-blue/20 text-xs font-semibold tracking-widest text-camarma-blue-light uppercase rounded-full">
           #¡AúpaCamarma!
         </span>
+
+        {/* Badge temporada activa */}
+        {temporadaConfig?.nombre && (
+          <span className="mt-2 px-4 py-1.5 bg-camarma-gold/10 border border-camarma-gold/30 text-xs font-black tracking-widest text-camarma-gold uppercase rounded-full flex items-center gap-1.5 animate-in fade-in duration-500">
+            <span className="w-1.5 h-1.5 bg-camarma-gold rounded-full animate-pulse" />
+            Temporada {temporadaConfig.nombre}
+          </span>
+        )}
       </header>
 
       {/* Selector de pestañas público */}
@@ -864,9 +889,16 @@ export default function PublicView({ onAdminClick, isAdmin }) {
                           </span>
                         </div>
                         <div className="min-w-0">
-                          <span className="text-[9px] bg-slate-800 border border-slate-700/40 px-1.5 py-0.5 rounded text-slate-500 font-bold uppercase tracking-wide">
-                            {match.condicion === "visitante" ? "✈️ Visitante" : "🏠 Local"}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-[9px] bg-slate-800 border border-slate-700/40 px-1.5 py-0.5 rounded text-slate-400 font-bold uppercase tracking-wide">
+                              {match.condicion === "visitante" ? "✈️ Visitante" : "🏠 Local"}
+                            </span>
+                            {match.tipoPartido && (
+                              <span className="text-[9px] bg-camarma-blue/10 border border-camarma-blue/20 px-1.5 py-0.5 rounded text-camarma-blue-light font-bold uppercase tracking-wide">
+                                🏆 {match.tipoPartido} {match.tipoPartido === "Liga" && match.jornada ? ` - J. ${match.jornada}` : ""}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="text-sm sm:text-base font-bold text-white leading-tight mt-1.5 truncate">
                             {match.condicion === "visitante" 
                               ? `${match.rival} vs Camarma CF` 
@@ -901,9 +933,16 @@ export default function PublicView({ onAdminClick, isAdmin }) {
                     >
                       {/* Fecha */}
                       <div className="flex justify-between items-center text-xs text-slate-500">
-                        <span>
-                          {new Date(match.fecha + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "long" })}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>
+                            {new Date(match.fecha + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "long" })}
+                          </span>
+                          {match.tipoPartido && (
+                            <span className="text-[8px] font-bold bg-camarma-blue/10 text-camarma-blue-light border border-camarma-blue/20 px-1.5 py-0.2 rounded uppercase">
+                              {match.tipoPartido} {match.tipoPartido === "Liga" && match.jornada ? ` - J. ${match.jornada}` : ""}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[9px] font-bold bg-emerald-950/50 text-emerald-400 border border-emerald-900/50 px-1.5 py-0.5 rounded uppercase">
                           Finalizado
                         </span>
@@ -1195,10 +1234,17 @@ export default function PublicView({ onAdminClick, isAdmin }) {
             {/* Cabecera / Banner del Marcador */}
             <div className="relative bg-gradient-to-r from-slate-850 to-camarma-blue/20 p-6 border-b border-slate-800 flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold bg-camarma-gold/10 text-camarma-gold border border-camarma-gold/20 px-2 py-0.5 rounded-md uppercase tracking-wider">
-                  Detalle del Partido
-                </span>
-                <p className="text-xs text-slate-400 mt-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-extrabold bg-camarma-gold/10 text-camarma-gold border border-camarma-gold/20 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                    Detalle del Partido
+                  </span>
+                  {selectedMatchDetails.tipoPartido && (
+                    <span className="text-[10px] font-extrabold bg-camarma-blue/15 text-camarma-blue-light border border-camarma-blue/20 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                      🏆 {selectedMatchDetails.tipoPartido} {selectedMatchDetails.tipoPartido === "Liga" && selectedMatchDetails.jornada ? ` - Jornada ${selectedMatchDetails.jornada}` : ""}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-1.5">
                   {new Date(selectedMatchDetails.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                 </p>
               </div>

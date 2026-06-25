@@ -9,6 +9,8 @@ import {
   onSnapshot,
   deleteDoc,
   addDoc,
+  setDoc,
+  getDocs,
   query,
   orderBy
 } from "firebase/firestore";
@@ -31,7 +33,13 @@ import {
   Eye,
   Pencil,
   X,
-  RefreshCw
+  RefreshCw,
+  BarChart2,
+  Sparkles,
+  Trophy,
+  TrendingUp,
+  Target,
+  Zap
 } from "lucide-react";
 import AddPlayerForm from "./AddPlayerForm";
 import ActaPartido from "./ActaPartido";
@@ -95,12 +103,23 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
   const [absenceModal, setAbsenceModal] = useState(null);
   const [absenceReasonInput, setAbsenceReasonInput] = useState("");
 
+  // ── Configuración de Temporada ──────────────────────────────────────────
+  const [temporadaConfig, setTemporadaConfig] = useState(null); // { nombre, fechaInicio, creadaAt }
+  // Modal Nueva Temporada
+  const [showNuevaTemporadaModal, setShowNuevaTemporadaModal] = useState(false);
+  const [nuevaTemporadaNombre, setNuevaTemporadaNombre] = useState("");
+  const [nuevaTemporadaFechaInicio, setNuevaTemporadaFechaInicio] = useState("");
+  const [iniciandoTemporada, setIniciandoTemporada] = useState(false);
+  const nuevaTemporadaFechaRef = useRef(null);
+
 
   // Estados para crear un partido
   const [rival, setRival] = useState("");
   const [fecha, setFecha] = useState("");
   const [hora, setHora] = useState("");
   const [condicion, setCondicion] = useState("local"); // "local" o "visitante"
+  const [tipoPartido, setTipoPartido] = useState("Liga"); // "Liga", "Copa", "Amistoso", "Pretemporada", "Playoff"
+  const [jornada, setJornada] = useState(""); // Solo para Liga
   const [matchError, setMatchError] = useState("");
   
   // Estado para el acta de partido
@@ -167,6 +186,20 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
     return () => unsubscribe();
   }, []);
 
+  // Escuchar configuración de temporada en tiempo real
+  useEffect(() => {
+    const unsubscribe = onSnapshot(doc(db, "config", "temporada"), (snapshot) => {
+      if (snapshot.exists()) {
+        setTemporadaConfig(snapshot.data());
+      } else {
+        setTemporadaConfig(null);
+      }
+    }, (error) => {
+      console.error("Error cargando config de temporada: ", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Autocompletar entrenamientos pasados (Martes, Jueves y Viernes) que no se registraron
   useEffect(() => {
     if (!trainingsLoaded || hasCheckedAutoTrainings.current) return;
@@ -174,18 +207,25 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
 
     const runAutoCompleter = async () => {
       const today = new Date();
-      const todayStr = today.getFullYear() + "-" + 
-                       String(today.getMonth() + 1).padStart(2, '0') + "-" + 
+      const todayStr = today.getFullYear() + "-" +
+                       String(today.getMonth() + 1).padStart(2, '0') + "-" +
                        String(today.getDate()).padStart(2, '0');
-                       
-      // Verificar los últimos 30 días para autocompletar entrenamientos habituales
-      for (let i = 0; i <= 30; i++) {
+
+      // Fecha de inicio de la temporada activa (si existe)
+      // Nunca se autocompletan entrenamientos anteriores al inicio de temporada
+      const seasonStart = temporadaConfig?.fechaInicio || null;
+
+      // Verificar los últimos 60 días para autocompletar entrenamientos habituales
+      for (let i = 0; i <= 60; i++) {
         const d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
         const yyyy = d.getFullYear();
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const dd = String(d.getDate()).padStart(2, '0');
         const dateStr = `${yyyy}-${mm}-${dd}`;
-        
+
+        // No generar sesiones anteriores al inicio de la temporada activa
+        if (seasonStart && dateStr < seasonStart) continue;
+
         const dayOfWeek = d.getDay(); // 2 = Martes, 4 = Jueves, 5 = Viernes
         if (dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 5) {
           let isPast = false;
@@ -219,7 +259,7 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
     };
 
     runAutoCompleter();
-  }, [trainingsLoaded, entrenamientos]);
+  }, [trainingsLoaded, entrenamientos, temporadaConfig]);
 
   // Guardar o actualizar entrenamiento
   const handleSaveTraining = async (e) => {
@@ -336,6 +376,60 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
       if (onLogout) onLogout();
     } catch (err) {
       console.error("Error al salir", err);
+    }
+  };
+
+  // ── Handler: Iniciar Nueva Temporada ────────────────────────────────────
+  const handleNuevaTemporada = async () => {
+    if (!nuevaTemporadaNombre.trim() || !nuevaTemporadaFechaInicio) return;
+    setIniciandoTemporada(true);
+    try {
+      // 1. Guardar configuración de temporada en Firestore
+      await setDoc(doc(db, "config", "temporada"), {
+        nombre: nuevaTemporadaNombre.trim(),
+        fechaInicio: nuevaTemporadaFechaInicio,
+        creadaAt: new Date().toISOString()
+      });
+
+      // 2. Resetear todas las estadísticas de los jugadores a 0
+      for (const player of jugadores) {
+        await updateDoc(doc(db, "jugadores", player.id), {
+          minutosJugados: 0,
+          golesFavor: 0,
+          golesContra: 0,
+          asistencias: 0,
+          tarjetasAmarillas: 0,
+          tarjetasRojas: 0,
+          partidosConvocados: 0,
+          mvps: 0,
+          faltasEntrenamiento: 0
+        });
+      }
+
+      // 3. Borrar todos los partidos de la temporada anterior
+      const partidosSnap = await getDocs(collection(db, "partidos"));
+      for (const d of partidosSnap.docs) {
+        await deleteDoc(doc(db, "partidos", d.id));
+      }
+
+      // 4. Borrar todos los entrenamientos de la temporada anterior
+      const entrenosSnap = await getDocs(collection(db, "entrenamientos"));
+      for (const d of entrenosSnap.docs) {
+        await deleteDoc(doc(db, "entrenamientos", d.id));
+      }
+
+      // 5. Resetear el flag de autocompletado para que vuelva a correr con la nueva config
+      hasCheckedAutoTrainings.current = false;
+
+      setShowNuevaTemporadaModal(false);
+      setNuevaTemporadaNombre("");
+      setNuevaTemporadaFechaInicio("");
+      showToast(`¡Temporada ${nuevaTemporadaNombre.trim()} iniciada con éxito! Datos reiniciados.`, "success");
+    } catch (err) {
+      console.error("Error iniciando nueva temporada:", err);
+      showToast("Error al iniciar la nueva temporada: " + err.message, "error");
+    } finally {
+      setIniciandoTemporada(false);
     }
   };
 
@@ -831,6 +925,8 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
         fecha: fecha,
         hora: hora || null,
         condicion: condicion,
+        tipoPartido: tipoPartido,
+        jornada: tipoPartido === "Liga" ? (jornada || null) : null,
         golesCamarma: 0,
         golesRival: 0,
         jugado: false
@@ -840,6 +936,8 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
       setFecha("");
       setHora("");
       setCondicion("local");
+      setTipoPartido("Liga");
+      setJornada("");
       setMatchError("");
     } catch (err) {
       console.error("Error añadiendo partido:", err);
@@ -1535,6 +1633,11 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
             <p className="text-[10px] text-camarma-gold font-black uppercase tracking-[0.2em] flex items-center gap-1 mt-0.5">
               <UserCheck className="w-3 h-3" />
               Panel de Directiva
+              {temporadaConfig?.nombre && (
+                <span className="ml-1.5 bg-camarma-blue/20 border border-camarma-blue/40 text-camarma-blue px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider">
+                  {temporadaConfig.nombre}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1567,6 +1670,18 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
         className="flex p-1.5 rounded-2xl sticky top-[73px] z-30 max-w-4xl mx-auto my-4 w-[calc(100%-2rem)] shadow-2xl border border-white/10 backdrop-blur-xl"
         style={{ background: 'rgba(15,23,42,0.70)' }}
       >
+        <button
+          onClick={() => { setActiveTab("dashboard"); setExpandedPlayerId(null); setShowModPanel(false); }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all duration-200 cursor-pointer select-none ${
+            activeTab === "dashboard"
+              ? "bg-gradient-to-r from-camarma-gold to-yellow-600 text-slate-950 shadow-lg shadow-camarma-gold/30 scale-[1.02]"
+              : "text-white/40 hover:text-white/80 hover:bg-white/8"
+          }`}
+        >
+          <BarChart2 className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">Dashboard</span>
+          <span className="inline sm:hidden">Dash</span>
+        </button>
         <button
           onClick={() => { setActiveTab("jugadores"); setExpandedPlayerId(null); setShowModPanel(false); }}
           className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all duration-200 cursor-pointer select-none ${
@@ -1610,11 +1725,348 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
 
       {/* Contenido Principal */}
       <main className="flex-1 p-4 max-w-4xl mx-auto w-full">
-        
+
+        {/* Pestaña: DASHBOARD */}
+        {activeTab === "dashboard" && (() => {
+          // ── Computación de datos para el Dashboard ────────────────────────
+          const partidosJugados = partidos.filter(p => p.jugado);
+          const victorias = partidosJugados.filter(p => p.golesCamarma > p.golesRival).length;
+          const empates = partidosJugados.filter(p => p.golesCamarma === p.golesRival).length;
+          const derrotas = partidosJugados.filter(p => p.golesCamarma < p.golesRival).length;
+          const puntos = victorias * 3 + empates;
+          const golFavor = partidosJugados.reduce((s, p) => s + (p.golesCamarma || 0), 0);
+          const golContra = partidosJugados.reduce((s, p) => s + (p.golesRival || 0), 0);
+
+          // Racha: últimos 5 partidos jugados (el más reciente primero)
+          const ultimos5 = [...partidosJugados].sort((a, b) => b.fecha.localeCompare(a.fecha)).slice(0, 5);
+
+          // Próximo partido: el más cercano no jugado a partir de hoy
+          const todayStr = new Date().toISOString().split("T")[0];
+          const proximoPartido = partidos
+            .filter(p => !p.jugado && p.fecha >= todayStr)
+            .sort((a, b) => a.fecha.localeCompare(b.fecha))[0] || null;
+
+          // Top jugadores
+          const jugadoresOrdenados = (field) => [...jugadores].sort((a, b) => (b[field] || 0) - (a[field] || 0));
+          const topGoleadores = jugadoresOrdenados("golesFavor").slice(0, 3);
+          const topPorteros = jugadoresOrdenados("golesContra").slice(0, 1);
+          const topAsistencias = jugadoresOrdenados("asistencias").slice(0, 3);
+          const topMinutos = jugadoresOrdenados("minutosJugados").slice(0, 3);
+
+          // Asistencia entrenamientos
+          const totalSesiones = entrenamientos.length;
+          const totalPlantilla = jugadores.length;
+          const totalFaltas = jugadores.reduce((s, j) => s + (j.faltasEntrenamiento || 0), 0);
+          const maxPosibleFaltas = totalSesiones * totalPlantilla;
+          const pctAsistencia = maxPosibleFaltas > 0
+            ? Math.round(((maxPosibleFaltas - totalFaltas) / maxPosibleFaltas) * 100)
+            : 100;
+          const colorAsistencia = pctAsistencia >= 80 ? "text-emerald-400" : pctAsistencia >= 60 ? "text-amber-400" : "text-red-400";
+          const bgAsistencia = pctAsistencia >= 80 ? "bg-emerald-500" : pctAsistencia >= 60 ? "bg-amber-500" : "bg-red-500";
+          const semaforo = pctAsistencia >= 80 ? "🟢" : pctAsistencia >= 60 ? "🟡" : "🔴";
+
+          // Plantilla disponible / lesionada
+          const lesionados = jugadores.filter(j => j.lesionado).length;
+          const disponibles = jugadores.length - lesionados;
+
+          // Días activa la temporada
+          let diasActiva = null;
+          if (temporadaConfig?.fechaInicio) {
+            const inicio = new Date(temporadaConfig.fechaInicio + "T00:00:00");
+            const hoy = new Date();
+            diasActiva = Math.max(0, Math.floor((hoy - inicio) / (1000 * 60 * 60 * 24)));
+          }
+
+          return (
+            <div className="space-y-5 animate-in fade-in duration-300">
+
+              {/* ── Banner Temporada Activa ─────────────────────────────── */}
+              <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800/80 to-slate-900 border border-camarma-gold/30 rounded-3xl p-5 shadow-2xl">
+                <div className="absolute inset-0 bg-gradient-to-r from-camarma-gold/5 via-transparent to-camarma-blue/5 pointer-events-none" />
+                <div className="relative flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <div className="absolute inset-0 rounded-full bg-camarma-gold/25 blur-md" />
+                      <img src="./escudo.webp" alt="Escudo" className="relative w-14 h-14 object-contain drop-shadow-[0_4px_16px_rgba(234,179,8,0.4)]" />
+                    </div>
+                    <div>
+                      {temporadaConfig ? (
+                        <>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black uppercase tracking-widest text-camarma-gold">Temporada Activa</span>
+                            <span className="bg-camarma-gold/15 border border-camarma-gold/40 text-camarma-gold px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider">
+                              {temporadaConfig.nombre}
+                            </span>
+                          </div>
+                          <h2 className="text-2xl font-black text-white mt-0.5">Camarma CF</h2>
+                          {diasActiva !== null && (
+                            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1">
+                              <Zap className="w-3 h-3 text-camarma-gold" />
+                              {diasActiva === 0 ? "Temporada iniciada hoy" : `${diasActiva} días de temporada`}
+                              {temporadaConfig.fechaInicio && (
+                                <span className="opacity-60 ml-1">
+                                  · Inicio: {new Date(temporadaConfig.fechaInicio + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}
+                                </span>
+                              )}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs font-black uppercase tracking-widest text-slate-500">Sin temporada configurada</span>
+                          <h2 className="text-2xl font-black text-white mt-0.5">Camarma CF</h2>
+                          <p className="text-xs text-slate-500 mt-0.5">Configura la temporada en la pestaña "Partidos"</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Rendimiento del Equipo + Racha ─────────────────────── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                {/* Record V/E/D */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Trophy className="w-5 h-5 text-camarma-gold" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Rendimiento</h3>
+                  </div>
+                  {partidosJugados.length === 0 ? (
+                    <p className="text-slate-500 text-xs text-center py-4">Sin partidos jugados aún</p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-2 mb-4">
+                        <div className="text-center bg-emerald-950/30 border border-emerald-900/40 rounded-2xl p-3">
+                          <span className="block text-2xl font-black text-emerald-400">{victorias}</span>
+                          <span className="block text-[10px] font-black uppercase text-emerald-600 tracking-wider mt-0.5">Victorias</span>
+                        </div>
+                        <div className="text-center bg-slate-950/40 border border-slate-800 rounded-2xl p-3">
+                          <span className="block text-2xl font-black text-slate-300">{empates}</span>
+                          <span className="block text-[10px] font-black uppercase text-slate-500 tracking-wider mt-0.5">Empates</span>
+                        </div>
+                        <div className="text-center bg-red-950/30 border border-red-900/40 rounded-2xl p-3">
+                          <span className="block text-2xl font-black text-red-400">{derrotas}</span>
+                          <span className="block text-[10px] font-black uppercase text-red-700 tracking-wider mt-0.5">Derrotas</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-xs bg-slate-950/40 rounded-xl p-3 border border-slate-800/40">
+                        <div className="text-center">
+                          <span className="block text-camarma-gold font-black text-lg">{puntos}</span>
+                          <span className="block text-slate-500 uppercase text-[9px] tracking-wider">Puntos</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-white font-black text-sm">{golFavor} – {golContra}</span>
+                          <span className="block text-slate-500 uppercase text-[9px] tracking-wider">Goles F/C</span>
+                        </div>
+                        <div className="text-center">
+                          <span className="block text-white font-black text-sm">{partidosJugados.length}</span>
+                          <span className="block text-slate-500 uppercase text-[9px] tracking-wider">Jugados</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Racha últimos 5 + Próximo partido */}
+                <div className="flex flex-col gap-3">
+                  {/* Racha */}
+                  <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-4 shadow-xl backdrop-blur-md flex-1">
+                    <div className="flex items-center gap-2 mb-3">
+                      <TrendingUp className="w-4 h-4 text-camarma-gold" />
+                      <h3 className="text-sm font-black text-white uppercase tracking-wider">Últimos 5</h3>
+                    </div>
+                    {ultimos5.length === 0 ? (
+                      <p className="text-slate-500 text-xs text-center py-2">Sin partidos jugados aún</p>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {[...ultimos5].reverse().map((p, i) => {
+                          const ganamos = p.golesCamarma > p.golesRival;
+                          const perdimos = p.golesCamarma < p.golesRival;
+                          const chip = ganamos
+                            ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                            : perdimos
+                            ? "bg-red-500/20 border-red-500/50 text-red-300"
+                            : "bg-slate-700/50 border-slate-600/50 text-slate-300";
+                          const letter = ganamos ? "V" : perdimos ? "D" : "E";
+                          return (
+                            <div key={i} className={`flex flex-col items-center border rounded-xl px-2.5 py-2 ${chip}`}>
+                              <span className="text-base font-black leading-none">{letter}</span>
+                              <span className="text-[9px] font-bold opacity-70 mt-0.5">{p.golesCamarma}-{p.golesRival}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {/* Próximo partido */}
+                  {proximoPartido && (
+                    <div className="bg-camarma-blue/10 border border-camarma-blue/30 rounded-2xl p-4 shadow-xl">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-camarma-blue block mb-1.5 flex items-center gap-1">
+                        <Target className="w-3 h-3" /> Próximo Partido
+                      </span>
+                      <p className="text-sm font-black text-white">vs. {proximoPartido.rival}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {new Date(proximoPartido.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}
+                        {proximoPartido.hora && ` · ${proximoPartido.hora}`}
+                        <span className={`ml-2 font-bold text-[10px] ${proximoPartido.condicion === "local" ? "text-camarma-blue" : "text-amber-400"}`}>
+                          {proximoPartido.condicion === "local" ? "🏠 Local" : "✈️ Visitante"}
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Líderes del Equipo ──────────────────────────────────── */}
+              <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md">
+                <div className="flex items-center gap-2 mb-4">
+                  <Zap className="w-5 h-5 text-camarma-gold" />
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">Líderes de la Temporada</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Top Goleadores */}
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2">⚽ Pichichi</span>
+                    <div className="space-y-1.5">
+                      {topGoleadores.filter(j => !j.isPortero && (j.golesFavor || 0) > 0).length === 0 ? (
+                        <p className="text-xs text-slate-600 italic">Sin goles registrados</p>
+                      ) : (
+                        topGoleadores.filter(j => !j.isPortero).map((j, i) => (
+                          <div key={j.id} className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-black text-slate-500 w-4">{i + 1}.</span>
+                            <img src={j.fotoUrl || "/placeholder-player.png"} alt={j.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700" />
+                            <span className="text-xs font-bold text-slate-200 flex-1 truncate">{j.nombre}</span>
+                            <span className="text-sm font-black text-camarma-gold">{j.golesFavor || 0}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  {/* Top Asistencias */}
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2">🪄 Asistencias</span>
+                    <div className="space-y-1.5">
+                      {topAsistencias.filter(j => (j.asistencias || 0) > 0).length === 0 ? (
+                        <p className="text-xs text-slate-600 italic">Sin asistencias registradas</p>
+                      ) : (
+                        topAsistencias.map((j, i) => (
+                          <div key={j.id} className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-black text-slate-500 w-4">{i + 1}.</span>
+                            <img src={j.fotoUrl || "/placeholder-player.png"} alt={j.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700" />
+                            <span className="text-xs font-bold text-slate-200 flex-1 truncate">{j.nombre}</span>
+                            <span className="text-sm font-black text-camarma-blue">{j.asistencias || 0}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  {/* Top Minutos */}
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2">⏱️ Más Minutos</span>
+                    <div className="space-y-1.5">
+                      {topMinutos.filter(j => (j.minutosJugados || 0) > 0).length === 0 ? (
+                        <p className="text-xs text-slate-600 italic">Sin minutos registrados</p>
+                      ) : (
+                        topMinutos.map((j, i) => (
+                          <div key={j.id} className="flex items-center gap-2.5">
+                            <span className="text-[10px] font-black text-slate-500 w-4">{i + 1}.</span>
+                            <img src={j.fotoUrl || "/placeholder-player.png"} alt={j.nombre} className="w-6 h-6 rounded-full object-cover border border-slate-700" />
+                            <span className="text-xs font-bold text-slate-200 flex-1 truncate">{j.nombre}</span>
+                            <span className="text-sm font-black text-slate-300">{j.minutosJugados || 0}'</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Asistencia + Estado Plantilla ───────────────────────── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Asistencia entrenamientos */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md">
+                  <div className="flex items-center gap-2 mb-4">
+                    <ClipboardCheck className="w-5 h-5 text-camarma-gold" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Asistencia</h3>
+                  </div>
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-4xl font-black leading-none">{semaforo}</span>
+                    <div>
+                      <span className={`text-3xl font-black leading-none ${colorAsistencia}`}>{pctAsistencia}%</span>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Asistencia global</p>
+                    </div>
+                  </div>
+                  <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${bgAsistencia}`}
+                      style={{ width: `${pctAsistencia}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-2">
+                    <span>{totalSesiones} sesiones</span>
+                    <span>{totalFaltas} faltas en total</span>
+                  </div>
+                  {/* Jugador con más faltas */}
+                  {jugadores.length > 0 && (
+                    (() => {
+                      const peorAsistente = [...jugadores].sort((a, b) => (b.faltasEntrenamiento || 0) - (a.faltasEntrenamiento || 0))[0];
+                      return peorAsistente?.faltasEntrenamiento > 0 ? (
+                        <div className="mt-3 bg-red-950/20 border border-red-900/30 rounded-xl px-3 py-2 flex items-center gap-2">
+                          <span className="text-[9px] font-black uppercase text-red-500 tracking-wider">Más faltas:</span>
+                          <img src={peorAsistente.fotoUrl || "/placeholder-player.png"} alt="" className="w-5 h-5 rounded-full object-cover border border-red-900/40" />
+                          <span className="text-xs font-bold text-red-300 flex-1 truncate">{peorAsistente.nombre}</span>
+                          <span className="text-sm font-black text-red-400">{peorAsistente.faltasEntrenamiento}</span>
+                        </div>
+                      ) : null;
+                    })()
+                  )}
+                </div>
+
+                {/* Estado plantilla */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Users className="w-5 h-5 text-camarma-gold" />
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Estado Plantilla</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="text-center bg-emerald-950/30 border border-emerald-900/40 rounded-2xl p-4">
+                      <span className="block text-3xl font-black text-emerald-400">{disponibles}</span>
+                      <span className="block text-[10px] font-black uppercase text-emerald-700 tracking-wider mt-0.5">💪 Disponibles</span>
+                    </div>
+                    <div className="text-center bg-red-950/30 border border-red-900/40 rounded-2xl p-4">
+                      <span className="block text-3xl font-black text-red-400">{lesionados}</span>
+                      <span className="block text-[10px] font-black uppercase text-red-700 tracking-wider mt-0.5">🩹 Lesionados</span>
+                    </div>
+                  </div>
+                  {lesionados > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Bajas actuales:</span>
+                      {jugadores.filter(j => j.lesionado).map(j => (
+                        <div key={j.id} className="flex items-center gap-2 bg-red-950/15 border border-red-900/25 rounded-xl px-3 py-1.5">
+                          <img src={j.fotoUrl || "/placeholder-player.png"} alt="" className="w-5 h-5 rounded-full object-cover" />
+                          <span className="text-xs font-bold text-red-300 flex-1 truncate">{j.nombre}</span>
+                          {j.tipoLesion && <span className="text-[9px] text-red-500 truncate max-w-[80px]">{j.tipoLesion}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {lesionados === 0 && (
+                    <div className="text-center py-3 text-xs text-emerald-500 font-bold">
+                      ✅ Plantilla al 100% disponible
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          );
+        })()}
+
         {/* Pestaña: JUGADORES */}
         {activeTab === "jugadores" && (
           <div className="space-y-6">
-            
+
             {/* Barra de Búsqueda y Botón Fichar */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
@@ -2149,6 +2601,43 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
         {activeTab === "partidos" && (
           <div className="space-y-6">
             
+            {/* Cabecera de Temporada / Nueva Temporada — Discreto */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 backdrop-blur-md">
+              <div className="flex items-center gap-3">
+                <div className="bg-camarma-blue/10 p-2 rounded-xl border border-camarma-blue/20">
+                  <Sparkles className="w-5 h-5 text-camarma-gold" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white leading-tight uppercase tracking-wider">
+                    {temporadaConfig ? `Temporada: ${temporadaConfig.nombre}` : "Sin Temporada Configurada"}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    {temporadaConfig && temporadaConfig.fechaInicio
+                      ? `Entrenamientos oficiales programados a partir del ${new Date(temporadaConfig.fechaInicio + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" })}`
+                      : "Debes configurar la temporada para que inicien los entrenamientos oficiales."}
+                  </p>
+                </div>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const nextYear = now.getMonth() >= 6
+                      ? `${now.getFullYear()}-${now.getFullYear() + 1}`
+                      : `${now.getFullYear() - 1}-${now.getFullYear()}`;
+                    setNuevaTemporadaNombre(temporadaConfig?.nombre || nextYear);
+                    setNuevaTemporadaFechaInicio("");
+                    setShowNuevaTemporadaModal(true);
+                  }}
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 text-slate-400 hover:text-camarma-gold border border-slate-800 hover:border-camarma-gold/30 text-[10.5px] font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer active:scale-95 uppercase tracking-wider backdrop-blur-sm bg-slate-950/40"
+                >
+                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-camarma-gold" />
+                  {temporadaConfig ? "Nueva Temporada" : "Iniciar Temporada"}
+                </button>
+              </div>
+            </div>
+
             {/* Crear un partido */}
             <div className="bg-slate-800/60 border border-slate-700/50 rounded-3xl p-5 shadow-xl backdrop-blur-md">
               <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
@@ -2208,6 +2697,37 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
                   />
                 </div>
 
+                {/* Tipo de Partido */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tipo de Partido</label>
+                  <select
+                    value={tipoPartido}
+                    onChange={(e) => setTipoPartido(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-camarma-blue"
+                  >
+                    <option value="Liga">Liga</option>
+                    <option value="Copa">Copa</option>
+                    <option value="Amistoso">Amistoso</option>
+                    <option value="Pretemporada">Pretemporada</option>
+                    <option value="Playoff">Playoff</option>
+                  </select>
+                </div>
+
+                {/* Jornada (Solo si es Liga) */}
+                {tipoPartido === "Liga" && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Jornada</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Ej. 1"
+                      value={jornada}
+                      onChange={(e) => setJornada(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-4 py-3 text-sm outline-none focus:border-camarma-blue"
+                    />
+                  </div>
+                )}
+
                 {/* Local o Visitante */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">¿Local o Visitante?</label>
@@ -2238,7 +2758,7 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
                 </div>
 
                 {/* Botón Programar */}
-                <div className="sm:col-span-2">
+                <div className={`${tipoPartido === "Liga" ? "sm:col-span-1" : "sm:col-span-2"}`}>
                   <button
                     type="submit"
                     className="w-full bg-gradient-to-r from-camarma-blue to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-black py-3.5 px-4 rounded-xl shadow-lg shadow-camarma-blue/15 transition-all cursor-pointer uppercase tracking-wider text-xs active:scale-[0.98]"
@@ -2283,11 +2803,18 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
                           )}
                         </div>
                         <div>
-                          {match.condicion && (
-                            <span className={`text-[10px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${match.condicion === "local" ? "bg-camarma-blue/20 text-camarma-blue" : "bg-orange-600/20 text-orange-400"}`}>
-                              {match.condicion === "local" ? "🏠 Local" : "✈️ Visitante"}
-                            </span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {match.condicion && (
+                              <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded ${match.condicion === "local" ? "bg-camarma-blue/20 text-camarma-blue" : "bg-orange-600/20 text-orange-400"}`}>
+                                {match.condicion === "local" ? "🏠 Local" : "✈️ Visitante"}
+                              </span>
+                            )}
+                            {match.tipoPartido && (
+                              <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-350`}>
+                                🏆 {match.tipoPartido} {match.tipoPartido === "Liga" && match.jornada ? ` - J. ${match.jornada}` : ""}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm font-semibold text-slate-400 mt-0.5">RIVAL</p>
                           <h4 className="text-base font-bold text-white">{match.rival}</h4>
                         </div>
@@ -2858,7 +3385,138 @@ export default function AdminPanel({ adminUser, onViewPublic, onLogout }) {
       </div>{/* /relative z-10 */}
     </div>
 
+    {/* ── Modal: Nueva Temporada ─────────────────────────────────────────── */}
+    {showNuevaTemporadaModal && (
+      <div className="fixed inset-0 z-[90] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700/60 rounded-3xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden max-h-[95vh] animate-in zoom-in-95 duration-200">
+          {/* Cabecera */}
+          <div className="relative overflow-hidden px-6 py-5 border-b border-slate-800">
+            <div className="absolute inset-0 bg-gradient-to-r from-camarma-gold/10 via-transparent to-camarma-blue/5 pointer-events-none" />
+            <div className="relative flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-camarma-gold/15 border border-camarma-gold/30 flex items-center justify-center shadow-md">
+                  <Sparkles className="w-6 h-6 text-camarma-gold" />
+                </div>
+                <div>
+                  <h4 className="font-black text-white text-base leading-tight">Nueva Temporada</h4>
+                  <span className="inline-block text-[9px] font-black uppercase text-camarma-gold tracking-widest mt-0.5">
+                    Reinicio de datos del club
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNuevaTemporadaModal(false)}
+                disabled={iniciandoTemporada}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer transition-colors active:scale-95 disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Cuerpo */}
+          <div className="p-6 space-y-5 overflow-y-auto flex-1">
+            {/* Nombre de temporada */}
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-400 mb-2">
+                Nombre de la Temporada
+              </label>
+              <input
+                type="text"
+                value={nuevaTemporadaNombre}
+                onChange={(e) => setNuevaTemporadaNombre(e.target.value)}
+                placeholder="Ej. 2026-2027"
+                disabled={iniciandoTemporada}
+                className="w-full bg-slate-950 border border-slate-800 focus:border-camarma-gold text-white rounded-xl px-4 py-3 text-base outline-none font-bold placeholder:text-slate-600 disabled:opacity-50 transition-colors"
+              />
+            </div>
+
+            {/* Fecha inicio de entrenamientos */}
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-400 mb-1">
+                Inicio de Entrenamientos
+              </label>
+              <p className="text-[10px] text-slate-500 mb-2">
+                A partir de esta fecha, el calendario mostrará los días de entrenamiento (Martes, Jueves y Viernes)
+              </p>
+              <div
+                onClick={() => { try { if (nuevaTemporadaFechaRef.current) nuevaTemporadaFechaRef.current.showPicker(); } catch(e){} }}
+                className="relative cursor-pointer"
+              >
+                <input
+                  type="date"
+                  ref={nuevaTemporadaFechaRef}
+                  value={nuevaTemporadaFechaInicio}
+                  onChange={(e) => setNuevaTemporadaFechaInicio(e.target.value)}
+                  disabled={iniciandoTemporada}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-camarma-gold text-white rounded-xl pl-4 pr-11 py-3 text-base outline-none cursor-pointer disabled:opacity-50 transition-colors"
+                />
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <CalendarDays className="w-5 h-5 text-camarma-gold" />
+                </div>
+              </div>
+            </div>
+
+            {/* Advertencia */}
+            <div className="bg-amber-950/30 border border-amber-800/50 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">⚠️</span>
+                <span className="text-xs font-black uppercase text-amber-400 tracking-wider">Acción irreversible</span>
+              </div>
+              <p className="text-xs text-amber-200/80 leading-relaxed">Al confirmar se realizarán los siguientes cambios:</p>
+              <ul className="text-xs text-amber-200/70 space-y-1.5 pl-2">
+                <li className="flex items-start gap-2">
+                  <span className="text-amber-500 mt-0.5 shrink-0">•</span>
+                  <span>Se <strong className="text-amber-300">resetearán a 0</strong> todas las estadísticas de los jugadores (goles, minutos, tarjetas, asistencias, MVPs y faltas)</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-amber-500 mt-0.5 shrink-0">•</span>
+                  <span>Se <strong className="text-amber-300">eliminarán todos los partidos</strong> y entrenamientos de la temporada anterior</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 mt-0.5 shrink-0">✓</span>
+                  <span className="text-emerald-200/80">Las <strong className="text-emerald-300">fichas de jugadores</strong> (fotos, datos personales, historial de lesiones) se conservan intactas</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Pie */}
+          <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/20 flex gap-3">
+            <button
+              onClick={() => setShowNuevaTemporadaModal(false)}
+              disabled={iniciandoTemporada}
+              className="flex-1 bg-slate-900/80 hover:bg-slate-850 border border-slate-800 text-slate-350 hover:text-white font-extrabold text-xs py-3.5 px-4 rounded-xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleNuevaTemporada}
+              disabled={iniciandoTemporada || !nuevaTemporadaNombre.trim() || !nuevaTemporadaFechaInicio}
+              className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-camarma-gold to-yellow-600 hover:from-yellow-500 hover:to-camarma-gold disabled:from-slate-800 disabled:to-slate-800 text-slate-950 disabled:text-slate-600 font-black text-xs py-3.5 px-4 rounded-xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider shadow-md shadow-camarma-gold/20 disabled:shadow-none disabled:cursor-not-allowed"
+            >
+              {iniciandoTemporada ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Iniciando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 stroke-[2.5px]" />
+                  Confirmar Nueva Temporada
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* Modal de Acta de Partido (pantalla completa) */}
+
     {actaMatch && (
       <ActaPartido
         match={actaMatch}

@@ -1397,6 +1397,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
           <div class="meta-grid">
             <div class="meta-item">
               <strong>Partido:</strong> ${match.condicion === "visitante" ? `${match.rival} vs Camarma CF` : `Camarma CF vs ${match.rival}`}<br/>
+              <strong>Tipo de Partido:</strong> ${match.tipoPartido || "Liga"}${match.tipoPartido === "Liga" && match.jornada ? ` (Jornada ${match.jornada})` : ""}<br/>
               <strong>Condición:</strong> ${match.condicion === "visitante" ? "✈️ Visitante" : "🏠 Local"}<br/>
               <strong>Fecha:</strong> ${new Date(match.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </div>
@@ -1466,6 +1467,7 @@ export default function ActaPartido({ match, jugadores, onClose }) {
             <h2 className="text-base sm:text-lg font-black text-white leading-tight uppercase font-sans tracking-wide">Acta del Partido</h2>
             <p className="text-[10px] sm:text-xs text-slate-400 font-medium mt-0.5">
               {match.condicion === "visitante" ? `${match.rival} vs Camarma CF` : `Camarma CF vs ${match.rival}`} • {new Date(match.fecha + "T00:00:00").toLocaleDateString("es-ES", { day:"numeric", month:"long", year:"numeric" })}
+              {match.tipoPartido && ` • ${match.tipoPartido}${match.tipoPartido === "Liga" && match.jornada ? ` (Jornada ${match.jornada})` : ""}`}
             </p>
           </div>
         </div>

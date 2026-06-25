@@ -28,5 +28,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    // Reglas para la colección de configuración (temporada activa)
+    match /config/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }
